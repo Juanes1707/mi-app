@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -39,6 +39,7 @@ const getRequestKey = (request: PendingFollowRequest) => request.id;
 
 export function ActivityScreen() {
   const theme = useTheme();
+  const router = useRouter();
   const [state, setState] = useState<ActivityScreenState>(initialState);
   const [retryVersion, setRetryVersion] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -222,16 +223,27 @@ export function ActivityScreen() {
     [isCurrentFocus],
   );
 
+  const openProfile = useCallback(
+    (profileId: string) => {
+      router.push({
+        pathname: '/activity/profile/[profileId]',
+        params: { profileId },
+      });
+    },
+    [router],
+  );
+
   const renderRequest: ListRenderItem<PendingFollowRequest> = useCallback(
     ({ item }) => (
       <FollowRequestItem
         action={actionByRequestId[item.id]}
         errorMessage={errorByRequestId[item.id]}
+        onOpenProfile={openProfile}
         onRespond={respondToRequest}
         request={item}
       />
     ),
-    [actionByRequestId, errorByRequestId, respondToRequest],
+    [actionByRequestId, errorByRequestId, openProfile, respondToRequest],
   );
 
   if (state.status === 'loading') {
@@ -286,11 +298,13 @@ const FollowRequestItem = memo(function FollowRequestItem({
   request,
   action,
   errorMessage,
+  onOpenProfile,
   onRespond,
 }: {
   request: PendingFollowRequest;
   action: FollowRequestDecision | undefined;
   errorMessage: string | undefined;
+  onOpenProfile: (profileId: string) => void;
   onRespond: (requestId: string, decision: FollowRequestDecision) => void;
 }) {
   const theme = useTheme();
@@ -300,16 +314,24 @@ const FollowRequestItem = memo(function FollowRequestItem({
 
   return (
     <View style={styles.requestRow}>
-      <View
-        accessibilityLabel={`Avatar de ${visibleName}`}
-        accessibilityRole="image"
-        style={[styles.avatar, { backgroundColor: theme.backgroundSelected }]}>
-        <Text style={[styles.avatarInitial, { color: theme.text }]}>
-          {getAvatarInitial(request)}
-        </Text>
-      </View>
+      <Pressable
+        accessibilityLabel={`Ver perfil de ${visibleName}`}
+        accessibilityRole="button"
+        disabled={isResponding}
+        onPress={() => onOpenProfile(request.requester.id)}
+        style={({ pressed }) => [
+          styles.profileIdentityButton,
+          pressed && !isResponding
+            ? { backgroundColor: theme.backgroundElement }
+            : undefined,
+          isResponding ? styles.disabled : undefined,
+        ]}>
+        <View style={[styles.avatar, { backgroundColor: theme.backgroundSelected }]}>
+          <Text style={[styles.avatarInitial, { color: theme.text }]}>
+            {getAvatarInitial(request)}
+          </Text>
+        </View>
 
-      <View style={styles.requestContent}>
         <View style={styles.identity}>
           <Text style={[styles.displayName, { color: theme.text }]}>{visibleName}</Text>
           {username ? (
@@ -317,7 +339,9 @@ const FollowRequestItem = memo(function FollowRequestItem({
           ) : null}
           <Text style={[styles.socialText, { color: theme.textSecondary }]}>Quiere seguirte.</Text>
         </View>
+      </Pressable>
 
+      <View style={styles.requestContent}>
         <View style={styles.actions}>
           <Pressable
             accessibilityLabel={`Rechazar solicitud de ${visibleName}`}
@@ -554,11 +578,16 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
   },
   requestRow: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
     gap: Spacing.three,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
+  },
+  profileIdentityButton: {
+    alignItems: 'flex-start',
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: Spacing.three,
+    padding: Spacing.one,
   },
   avatar: {
     alignItems: 'center',
@@ -573,12 +602,14 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   requestContent: {
-    flex: 1,
     gap: Spacing.three,
+    marginLeft: 68,
     minWidth: 0,
   },
   identity: {
+    flex: 1,
     gap: Spacing.half,
+    minWidth: 0,
   },
   displayName: {
     fontSize: 16,
