@@ -25,6 +25,28 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Supabase configuration
+
+1. Copy `.env.example` to `.env`.
+2. Complete `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` with the public client values from the Supabase project Connect panel.
+3. Start the application with `npx expo start`.
+
+Never place a `service_role` key or another administrative secret in the mobile application.
+
+## Backend boundary
+
+Configure `EXPO_PUBLIC_BACKEND_BASE_URL` in `.env` with the public base URL for the deployed Edge Functions API. The expected boundary is:
+
+```text
+AUTH:
+React Native → Supabase Auth
+
+BUSINESS DATA:
+React Native → BackendApiClient → Edge Function → Supabase
+```
+
+Screens, hooks, providers, domain code, and application use cases must not execute `supabase.from(...)` directly. Privileged credentials belong exclusively to server-side infrastructure.
+
 ## Get a fresh project
 
 When you're ready, run:

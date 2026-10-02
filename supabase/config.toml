@@ -1,0 +1,14 @@
+[functions.health]
+verify_jwt = false
+
+[functions.auth-check]
+verify_jwt = true
+
+[functions.profile-me]
+verify_jwt = true
+
+[functions.follow]
+verify_jwt = true
+
+[functions.follow-requests]
+verify_jwt = true
