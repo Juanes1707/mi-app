@@ -10,6 +10,13 @@ export default function ProfileStackLayout() {
           title: 'Editar perfil',
         }}
       />
+      <Stack.Screen
+        name="view/[profileId]"
+        options={{
+          headerShown: true,
+          title: 'Perfil',
+        }}
+      />
     </Stack>
   );
 }
