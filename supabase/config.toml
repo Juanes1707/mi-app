@@ -12,3 +12,6 @@ verify_jwt = true
 
 [functions.follow-requests]
 verify_jwt = true
+
+[functions.profiles]
+verify_jwt = true
