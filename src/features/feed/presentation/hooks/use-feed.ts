@@ -31,6 +31,7 @@ export function useFeed() {
   const stateRef = useRef(state);
   const mountedRef = useRef(false);
   const generationRef = useRef(0);
+  const firstPageLoadRef = useRef<Promise<boolean> | null>(null);
 
   // Update the guard synchronously, before React's next render.
   const publish = useCallback((next: FeedState) => {
@@ -38,10 +39,13 @@ export function useFeed() {
     setState(next);
   }, []);
 
-  const loadFirstPage = useCallback(async () => {
-    if (!mountedRef.current) return;
+  // Resolves true when this call published a fresh first page.
+  const loadFirstPage = useCallback((): Promise<boolean> => {
+    if (!mountedRef.current) return Promise.resolve(false);
     const previous = stateRef.current;
-    if (previous.operation === 'initial' || previous.operation === 'refreshing') return;
+    if (previous.operation === 'initial' || previous.operation === 'refreshing') {
+      return Promise.resolve(false);
+    }
 
     const generation = ++generationRef.current;
     const hasPage = previous.status === 'ready';
@@ -54,23 +58,39 @@ export function useFeed() {
       loadMoreError: null,
     });
 
-    try {
-      const page = await getFeedPage.execute(null);
-      if (!mountedRef.current || generation !== generationRef.current) return;
-      publish({ status: 'ready', page, operation: 'idle', error: null,
-        refreshError: null, loadMoreError: null });
-    } catch (error: unknown) {
-      if (!mountedRef.current || generation !== generationRef.current) return;
-      publish({
-        ...previous,
-        status: hasPage ? 'ready' : 'initial-error',
-        operation: 'idle',
-        error: hasPage ? null : toFeedError(error),
-        refreshError: hasPage ? toFeedError(error) : null,
-        loadMoreError: null,
-      });
-    }
+    const load = (async (): Promise<boolean> => {
+      try {
+        const page = await getFeedPage.execute(null);
+        if (!mountedRef.current || generation !== generationRef.current) return false;
+        publish({ status: 'ready', page, operation: 'idle', error: null,
+          refreshError: null, loadMoreError: null });
+        return true;
+      } catch (error: unknown) {
+        if (!mountedRef.current || generation !== generationRef.current) return false;
+        publish({
+          ...previous,
+          status: hasPage ? 'ready' : 'initial-error',
+          operation: 'idle',
+          error: hasPage ? null : toFeedError(error),
+          refreshError: hasPage ? toFeedError(error) : null,
+          loadMoreError: null,
+        });
+        return false;
+      }
+    })();
+    firstPageLoadRef.current = load;
+    void load.finally(() => {
+      if (firstPageLoadRef.current === load) firstPageLoadRef.current = null;
+    });
+    return load;
   }, [publish]);
+
+  // For callers that just changed server state: the page must come from a request
+  // started AFTER the change, so any load already in flight is awaited first.
+  const refreshAfterChange = useCallback(async (): Promise<boolean> => {
+    while (firstPageLoadRef.current !== null) await firstPageLoadRef.current;
+    return loadFirstPage();
+  }, [loadFirstPage]);
 
   const loadMore = useCallback(async (retry = false) => {
     const previous = stateRef.current;
@@ -108,5 +128,7 @@ export function useFeed() {
 
   const onEndReached = useCallback(() => { void loadMore(); }, [loadMore]);
   const retryLoadMore = useCallback(() => { void loadMore(true); }, [loadMore]);
-  return { state, refresh: loadFirstPage, retryInitial: loadFirstPage, onEndReached, retryLoadMore };
+  return {
+    state, refresh: loadFirstPage, refreshAfterChange, retryInitial: loadFirstPage, onEndReached, retryLoadMore,
+  };
 }

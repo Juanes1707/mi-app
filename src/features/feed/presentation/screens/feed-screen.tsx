@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, Text, View,
   type ListRenderItem, type ViewabilityConfig, type ViewToken,
@@ -7,11 +7,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset } from '@/constants/theme';
+import { useAuth } from '@/features/auth/presentation/hooks/use-auth';
 import { getFeedInvalidationVersion } from '@/features/feed/application/feed-invalidation';
 import type { FeedPost } from '@/features/feed/domain/entities/feed-post';
 import type { FeedErrorCode } from '@/features/feed/domain/errors/feed-error';
 import { PostCard } from '@/features/feed/presentation/components/post-card';
 import { useFeed } from '@/features/feed/presentation/hooks/use-feed';
+import { useOptimisticPostLikes } from '@/features/feed/presentation/hooks/use-optimistic-post-likes';
 import { collectVisiblePostIds } from '@/features/feed/presentation/visible-post-ids';
 import { usePostMediaMemoryPressure } from '@/features/post-media/presentation/hooks/use-post-media-memory-pressure';
 import { useTheme } from '@/hooks/use-theme';
@@ -78,7 +80,10 @@ function PostSeparator() {
 export function FeedScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { state, refresh, retryInitial, onEndReached, retryLoadMore } = useFeed();
+  const { state, refresh, refreshAfterChange, retryInitial, onEndReached, retryLoadMore } = useFeed();
+  // Owner comes from the in-memory auth state: no auth/network round trip per tap.
+  const { user } = useAuth();
+  const likes = useOptimisticPostLikes(user?.id ?? null, refreshAfterChange);
   const lastSeenInvalidation = useRef(getFeedInvalidationVersion());
   useFocusEffect(useCallback(() => {
     const version = getFeedInvalidationVersion();
@@ -98,15 +103,25 @@ export function FeedScreen() {
       setVisiblePostIds((previous) => collectVisiblePostIds(viewableItems, previous));
     },
   ).current;
-  const renderPost: ListRenderItem<FeedPost> = useCallback(
-    ({ item }) => (
+  const { desiredLikes, failedPostIds, getDisplayedLike, toggleLike } = likes;
+  // Server posts (any page, any refresh) + pending local like state, derived at render.
+  const renderPost: ListRenderItem<FeedPost> = useCallback(({ item }) => {
+    const displayed = getDisplayedLike(item);
+    return (
       <PostCard
         post={item}
         isMediaVisible={visiblePostIds.has(item.id)}
+        isLiked={displayed.isLiked}
+        likesCount={displayed.likesCount}
+        likeSaveFailed={failedPostIds.has(item.id)}
+        onToggleLike={toggleLike}
         onOpenAuthor={openAuthor}
       />
-    ),
-    [openAuthor, visiblePostIds],
+    );
+  }, [openAuthor, visiblePostIds, getDisplayedLike, failedPostIds, toggleLike]);
+  const listExtraData = useMemo(
+    () => ({ visiblePostIds, desiredLikes, failedPostIds }),
+    [visiblePostIds, desiredLikes, failedPostIds],
   );
 
   if (state.status === 'initial-loading') {
@@ -132,7 +147,7 @@ export function FeedScreen() {
       <FlatList
         contentContainerStyle={styles.listContent}
         data={state.page.posts}
-        extraData={visiblePostIds}
+        extraData={listExtraData}
         ItemSeparatorComponent={PostSeparator}
         keyExtractor={getPostKey}
         ListHeaderComponent={

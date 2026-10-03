@@ -9,9 +9,22 @@ const dateFormatter = new Intl.DateTimeFormat('es-CO', {
   day: 'numeric', month: 'long', year: 'numeric',
 });
 
+type PostCardProps = {
+  post: FeedPost;
+  isMediaVisible: boolean;
+  // Displayed like state (server + pending local intentions), computed by the screen.
+  isLiked: boolean;
+  likesCount: number;
+  likeSaveFailed: boolean;
+  onToggleLike: (post: FeedPost) => void;
+  onOpenAuthor: (profileId: string) => void;
+};
+
+const HEART_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
+
 export const PostCard = memo(function PostCard({
-  post, isMediaVisible, onOpenAuthor,
-}: { post: FeedPost; isMediaVisible: boolean; onOpenAuthor: (profileId: string) => void }) {
+  post, isMediaVisible, isLiked, likesCount, likeSaveFailed, onToggleLike, onOpenAuthor,
+}: PostCardProps) {
   const theme = useTheme();
   const username = post.author.username?.trim();
   const name = post.author.displayName?.trim() || username || 'Usuario';
@@ -42,12 +55,27 @@ export const PostCard = memo(function PostCard({
       />
 
       <View style={styles.details}>
-        <Text
-          accessibilityLabel={`${post.likesCount} Me gusta. ${post.isLiked ? 'Te gusta esta publicación.' : 'No has indicado Me gusta.'}`}
-          style={[styles.likes, { color: theme.text }]}>
-          <Text style={post.isLiked ? styles.liked : undefined}>{post.isLiked ? '♥' : '♡'}</Text>
-          {' '}{post.likesCount.toLocaleString('es-CO')} Me gusta
-        </Text>
+        <View style={styles.likesRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isLiked ? 'Quitar Me gusta' : 'Dar Me gusta'}
+            accessibilityState={{ selected: isLiked }}
+            hitSlop={HEART_HIT_SLOP}
+            onPress={() => onToggleLike(post)}
+            style={({ pressed }) => (pressed ? styles.pressed : undefined)}>
+            <Text style={[styles.heart, isLiked ? styles.liked : { color: theme.text }]}>
+              {isLiked ? '♥' : '♡'}
+            </Text>
+          </Pressable>
+          <Text style={[styles.likes, { color: theme.text }]}>
+            {likesCount.toLocaleString('es-CO')} Me gusta
+          </Text>
+        </View>
+        {likeSaveFailed ? (
+          <Text accessibilityLiveRegion="polite" style={[styles.likeError, { color: theme.textSecondary }]}>
+            No pudimos guardar tu acción.
+          </Text>
+        ) : null}
         <Text style={[styles.body, { color: theme.textSecondary }]}>
           {post.commentsCount.toLocaleString('es-CO')} comentarios
         </Text>
@@ -73,7 +101,10 @@ const styles = StyleSheet.create({
   name: { fontSize: 14, fontWeight: '700', lineHeight: 20 },
   username: { fontSize: 12, lineHeight: 18 },
   details: { gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
+  likesRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  heart: { fontSize: 22, lineHeight: 26 },
   likes: { fontSize: 16, fontWeight: '600', lineHeight: 24 },
+  likeError: { fontSize: 12, lineHeight: 16 },
   liked: { color: '#D92545' },
   body: { fontSize: 14, lineHeight: 20 },
   captionName: { fontWeight: '700' },

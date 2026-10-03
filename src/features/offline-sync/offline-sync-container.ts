@@ -2,6 +2,9 @@ import { openDatabaseAsync } from 'expo-sqlite';
 
 import { authProviderDependencies } from '@/features/auth/auth-container';
 import { OfflineMutationProcessor } from '@/features/offline-sync/application/offline-mutation-processor';
+import {
+  GetPendingPostLikeProjection, QueueSetPostLike,
+} from '@/features/offline-sync/application/post-like-use-cases';
 import { BackendPostLikeRemoteGateway } from '@/features/offline-sync/data/backend-post-like-remote-gateway';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
 import {
@@ -26,3 +29,6 @@ export const offlineMutationProcessor = new OfflineMutationProcessor(
   },
   new BackendPostLikeRemoteGateway(authenticatedBackendApiClient),
 );
+
+export const queueSetPostLike = new QueueSetPostLike(offlineMutationQueue);
+export const getPendingPostLikeProjection = new GetPendingPostLikeProjection(offlineMutationQueue);
