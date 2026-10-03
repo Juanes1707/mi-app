@@ -12,7 +12,15 @@ import {
   getPendingPostLikeProjection, offlineMutationProcessor, queueSetPostLike,
 } from '@/features/offline-sync/offline-sync-container';
 
+// Whether the owner's durable pending state is known. Likes are accepted only when
+// 'ready': before that a tap could invert the wrong state (e.g. server false while
+// SQLite already holds a pending true) and record an intention the user never had.
+export type PendingLikesStatus = 'no-owner' | 'loading' | 'ready' | 'error';
+
 type LikesState = {
+  // Owner this state belongs to: another owner's state is never rendered or used.
+  owner: string | null;
+  status: PendingLikesStatus;
   // Last pending desired state per post, as persisted in SQLite.
   durable: ReadonlyMap<string, boolean>;
   // Taps whose INSERT has not confirmed yet, in tap order.
@@ -21,7 +29,18 @@ type LikesState = {
   failedPostIds: ReadonlySet<string>;
 };
 
-const EMPTY_STATE: LikesState = { durable: new Map(), ephemeral: [], failedPostIds: new Set() };
+const NO_DESIRED: ReadonlyMap<string, boolean> = new Map();
+const NO_FAILURES: ReadonlySet<string> = new Set();
+
+function initialStateFor(owner: string | null): LikesState {
+  return {
+    owner,
+    status: owner === null ? 'no-owner' : 'loading',
+    durable: NO_DESIRED,
+    ephemeral: [],
+    failedPostIds: NO_FAILURES,
+  };
+}
 
 function withDesired(map: ReadonlyMap<string, boolean>, postId: string, liked: boolean) {
   const next = new Map(map);
@@ -43,7 +62,7 @@ export function useOptimisticPostLikes(
   ownerUserId: string | null,
   refreshFeed: () => Promise<boolean>,
 ) {
-  const [state, setState] = useState<LikesState>(EMPTY_STATE);
+  const [state, setState] = useState<LikesState>(() => initialStateFor(ownerUserId));
   const stateRef = useRef(state);
   const ownerRef = useRef(ownerUserId);
   // Bumped on owner change and unmount: late callbacks of older work are ignored.
@@ -65,6 +84,22 @@ export function useOptimisticPostLikes(
     setState(next);
   }, []);
 
+  // Initial (or retried) load for an owner. Until it succeeds the effective like state
+  // is unknown, so likes stay disabled; a failure (including corrupt-data or an
+  // unsupported database version) shows no pending state and deletes nothing.
+  const bootstrapProjection = useCallback(async (owner: string, generation: number) => {
+    try {
+      const durable = await getPendingPostLikeProjection.execute(owner);
+      if (generation !== generationRef.current) return;
+      commit((current) => ({ ...current, durable, status: 'ready' }));
+    } catch {
+      if (generation !== generationRef.current) return;
+      commit((current) => ({ ...current, durable: NO_DESIRED, status: 'error' }));
+    }
+  }, [commit]);
+
+  // Reload after a sync. A trustworthy projection already exists, so likes stay enabled
+  // and the previous overlay is kept until the new one replaces it (or if reading fails).
   const reloadProjection = useCallback(async (owner: string, generation: number) => {
     try {
       const durable = await getPendingPostLikeProjection.execute(owner);
@@ -132,15 +167,30 @@ export function useOptimisticPostLikes(
     ownerRef.current = ownerUserId;
     observedDrainRef.current = null;
     drainJoinedRef.current = false;
-    commit(() => EMPTY_STATE);
-    if (ownerUserId !== null) void reloadProjection(ownerUserId, generation);
-  }, [ownerUserId, commit, reloadProjection]);
+    commit(() => initialStateFor(ownerUserId));
+    if (ownerUserId !== null) void bootstrapProjection(ownerUserId, generation);
+  }, [ownerUserId, commit, bootstrapProjection]);
+
+  const retryPendingLikesLoad = useCallback(() => {
+    const owner = ownerRef.current;
+    const current = stateRef.current;
+    if (owner === null || !mountedRef.current || current.owner !== owner || current.status !== 'error') {
+      return;
+    }
+    generationRef.current += 1;
+    const generation = generationRef.current;
+    commit((latest) => ({ ...latest, status: 'loading' }));
+    void bootstrapProjection(owner, generation);
+  }, [commit, bootstrapProjection]);
 
   const toggleLike = useCallback((post: FeedPost) => {
     const owner = ownerRef.current;
-    if (owner === null || !mountedRef.current) return;
-
     const current = stateRef.current;
+    // No intention is recorded while the owner's pending state is unknown.
+    if (owner === null || !mountedRef.current || current.owner !== owner || current.status !== 'ready') {
+      return;
+    }
+
     const desired = mergeDesiredLikes(current.durable, current.ephemeral).get(post.id);
     const shown = projectPostLikeState({
       serverLiked: post.isLiked, serverLikesCount: post.likesCount, desiredLiked: desired,
@@ -189,9 +239,16 @@ export function useOptimisticPostLikes(
     );
   }, [commit, requestDrain]);
 
+  // The previous owner's state is never rendered, not even for the frame before the
+  // owner-change effect runs: a new owner starts as loading, without any overlay.
+  const visible = useMemo(
+    () => (state.owner === ownerUserId ? state : initialStateFor(ownerUserId)),
+    [state, ownerUserId],
+  );
+
   const desiredLikes = useMemo(
-    () => mergeDesiredLikes(state.durable, state.ephemeral),
-    [state.durable, state.ephemeral],
+    () => mergeDesiredLikes(visible.durable, visible.ephemeral),
+    [visible.durable, visible.ephemeral],
   );
 
   // O(1) per post at render time; no per-post queries or subscriptions.
@@ -199,5 +256,12 @@ export function useOptimisticPostLikes(
     serverLiked: post.isLiked, serverLikesCount: post.likesCount, desiredLiked: desiredLikes.get(post.id),
   }), [desiredLikes]);
 
-  return { desiredLikes, failedPostIds: state.failedPostIds, getDisplayedLike, toggleLike };
+  return {
+    desiredLikes,
+    failedPostIds: visible.failedPostIds,
+    pendingLikesStatus: visible.status,
+    getDisplayedLike,
+    toggleLike,
+    retryPendingLikesLoad,
+  };
 }

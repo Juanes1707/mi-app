@@ -103,7 +103,11 @@ export function FeedScreen() {
       setVisiblePostIds((previous) => collectVisiblePostIds(viewableItems, previous));
     },
   ).current;
-  const { desiredLikes, failedPostIds, getDisplayedLike, toggleLike } = likes;
+  const {
+    desiredLikes, failedPostIds, pendingLikesStatus, getDisplayedLike, toggleLike, retryPendingLikesLoad,
+  } = likes;
+  // Likes are interactive only once the owner's durable pending state is known.
+  const isLikeEnabled = pendingLikesStatus === 'ready';
   // Server posts (any page, any refresh) + pending local like state, derived at render.
   const renderPost: ListRenderItem<FeedPost> = useCallback(({ item }) => {
     const displayed = getDisplayedLike(item);
@@ -113,15 +117,16 @@ export function FeedScreen() {
         isMediaVisible={visiblePostIds.has(item.id)}
         isLiked={displayed.isLiked}
         likesCount={displayed.likesCount}
+        isLikeEnabled={isLikeEnabled}
         likeSaveFailed={failedPostIds.has(item.id)}
         onToggleLike={toggleLike}
         onOpenAuthor={openAuthor}
       />
     );
-  }, [openAuthor, visiblePostIds, getDisplayedLike, failedPostIds, toggleLike]);
+  }, [openAuthor, visiblePostIds, getDisplayedLike, isLikeEnabled, failedPostIds, toggleLike]);
   const listExtraData = useMemo(
-    () => ({ visiblePostIds, desiredLikes, failedPostIds }),
-    [visiblePostIds, desiredLikes, failedPostIds],
+    () => ({ visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled }),
+    [visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled],
   );
 
   if (state.status === 'initial-loading') {
@@ -155,6 +160,12 @@ export function FeedScreen() {
             <FeedHeader />
             {state.refreshError ? (
               <Feedback message={messages[state.refreshError.code]} onRetry={refresh} />
+            ) : null}
+            {pendingLikesStatus === 'error' ? (
+              <Feedback
+                message="No pudimos cargar tus acciones pendientes."
+                onRetry={retryPendingLikesLoad}
+              />
             ) : null}
           </>
         }

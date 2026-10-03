@@ -15,6 +15,8 @@ type PostCardProps = {
   // Displayed like state (server + pending local intentions), computed by the screen.
   isLiked: boolean;
   likesCount: number;
+  // False while the user's pending like state is not known yet (or failed to load).
+  isLikeEnabled: boolean;
   likeSaveFailed: boolean;
   onToggleLike: (post: FeedPost) => void;
   onOpenAuthor: (profileId: string) => void;
@@ -23,7 +25,7 @@ type PostCardProps = {
 const HEART_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 
 export const PostCard = memo(function PostCard({
-  post, isMediaVisible, isLiked, likesCount, likeSaveFailed, onToggleLike, onOpenAuthor,
+  post, isMediaVisible, isLiked, likesCount, isLikeEnabled, likeSaveFailed, onToggleLike, onOpenAuthor,
 }: PostCardProps) {
   const theme = useTheme();
   const username = post.author.username?.trim();
@@ -59,10 +61,14 @@ export const PostCard = memo(function PostCard({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={isLiked ? 'Quitar Me gusta' : 'Dar Me gusta'}
-            accessibilityState={{ selected: isLiked }}
+            accessibilityState={{ selected: isLiked, disabled: !isLikeEnabled }}
+            disabled={!isLikeEnabled}
             hitSlop={HEART_HIT_SLOP}
             onPress={() => onToggleLike(post)}
-            style={({ pressed }) => (pressed ? styles.pressed : undefined)}>
+            style={({ pressed }) => [
+              !isLikeEnabled ? styles.likeDisabled : undefined,
+              pressed ? styles.pressed : undefined,
+            ]}>
             <Text style={[styles.heart, isLiked ? styles.liked : { color: theme.text }]}>
               {isLiked ? '♥' : '♡'}
             </Text>
@@ -105,6 +111,7 @@ const styles = StyleSheet.create({
   heart: { fontSize: 22, lineHeight: 26 },
   likes: { fontSize: 16, fontWeight: '600', lineHeight: 24 },
   likeError: { fontSize: 12, lineHeight: 16 },
+  likeDisabled: { opacity: 0.45 },
   liked: { color: '#D92545' },
   body: { fontSize: 14, lineHeight: 20 },
   captionName: { fontWeight: '700' },
