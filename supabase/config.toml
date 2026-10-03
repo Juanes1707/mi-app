@@ -21,3 +21,6 @@ verify_jwt = true
 
 [functions.feed]
 verify_jwt = true
+
+[functions.post-media-upload]
+verify_jwt = true
