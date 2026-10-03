@@ -27,3 +27,6 @@ verify_jwt = true
 
 [functions.posts]
 verify_jwt = true
+
+[functions.post-media-read]
+verify_jwt = true
