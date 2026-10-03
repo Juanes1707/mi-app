@@ -8,11 +8,15 @@ import { OfflineMutationProcessor } from '@/features/offline-sync/application/of
 import { OfflineSyncOrchestrator } from '@/features/offline-sync/application/offline-sync-orchestrator';
 import { OwnerReconciliationSignal } from '@/features/offline-sync/application/owner-reconciliation-signal';
 import {
+  CreatePostCommentId, GetPendingPostCommentProjection, QueueCreatePostComment,
+} from '@/features/offline-sync/application/post-comment-use-cases';
+import {
   GetPendingPostLikeProjection, QueueSetPostLike,
 } from '@/features/offline-sync/application/post-like-use-cases';
 import { BackendPostCommentRemoteGateway } from '@/features/offline-sync/data/backend-post-comment-remote-gateway';
 import { BackendPostLikeRemoteGateway } from '@/features/offline-sync/data/backend-post-like-remote-gateway';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
+import { expoUuidGenerator } from '@/features/offline-sync/infrastructure/expo-uuid-generator';
 import {
   OFFLINE_MUTATIONS_DATABASE_NAME, prepareOfflineMutationDatabase,
 } from '@/features/offline-sync/infrastructure/offline-mutation-database';
@@ -60,3 +64,6 @@ export const offlineSyncCoordinator = new OfflineSyncCoordinator(
 
 export const queueSetPostLike = new QueueSetPostLike(offlineMutationQueue);
 export const getPendingPostLikeProjection = new GetPendingPostLikeProjection(offlineMutationQueue);
+export const createPostCommentId = new CreatePostCommentId(expoUuidGenerator);
+export const queueCreatePostComment = new QueueCreatePostComment(offlineMutationQueue);
+export const getPendingPostCommentProjection = new GetPendingPostCommentProjection(offlineMutationQueue);

@@ -1,6 +1,19 @@
 // POST /post-comments limit: PostgreSQL char_length, i.e. Unicode code points.
 export const MAX_POST_COMMENT_BODY_CODE_POINTS = 500;
 
+// Unicode code points, the unit of the 500 limit (an emoji counts once; a lone
+// surrogate counts once too, although it is not a valid body).
+export function countCodePoints(text: string): number {
+  let codePoints = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    const next = text.charCodeAt(index + 1);
+    if (unit >= 0xd800 && unit <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) index += 1;
+    codePoints += 1;
+  }
+  return codePoints;
+}
+
 // A body the backend can accept. Checked before it is persisted, because a queued
 // comment the backend can never store would block the whole FIFO queue behind it.
 // - not whitespace-only (trim is used only to test this; the body is kept as is);

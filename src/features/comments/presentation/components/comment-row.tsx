@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { PostComment } from '@/features/comments/domain/post-comment';
@@ -10,7 +10,7 @@ import { useTheme } from '@/hooks/use-theme';
 const MAX_VISUAL_DEPTH = 3;
 const INDENT_PER_LEVEL = 16;
 const BASE_PADDING = 16;
-const REPLIES_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+const ACTION_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
 // Short, absolute and in the device's time zone; no relative "hace X" text.
 const timestampFormatter = new Intl.DateTimeFormat('es-CO', {
@@ -31,24 +31,52 @@ export function repliesLabel(count: number): string {
   return count === 1 ? 'Ver 1 respuesta' : `Ver ${count.toLocaleString('es-CO')} respuestas`;
 }
 
-type CommentRowProps = {
-  comment: PostComment;
-  depth: number;
-  isExpanded: boolean;
-  onExpandReplies: (commentId: string) => void;
-  onCollapseReplies: (commentId: string) => void;
-};
+// Collapsed label. Local replies are an extra hint, never added to the server count:
+// a pending reply may already be counted by the server after a crash and replay.
+export function collapsedRepliesLabel(serverCount: number, localCount: number): string {
+  if (serverCount === 0) return 'Ver respuestas';
+  if (localCount === 0) return repliesLabel(serverCount);
+  return `${repliesLabel(serverCount)} · +${localCount} ${localCount === 1 ? 'tuya' : 'tuyas'}`;
+}
 
-export const CommentRow = memo(function CommentRow({
-  comment, depth, isExpanded, onExpandReplies, onCollapseReplies,
-}: CommentRowProps) {
+export function CommentAction({
+  label, onPress, disabled = false, accessibilityLabel, expanded,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  expanded?: boolean;
+}) {
   const theme = useTheme();
-  const { username } = comment.author;
-  const displayName = comment.author.displayName?.trim() ? comment.author.displayName : null;
-  const name = displayName ?? (username === null ? 'Usuario' : `@${username}`);
-  const handle = displayName !== null && username !== null ? `@${username}` : null;
-  const initial = (Array.from(displayName?.trim() || username || '?')[0] ?? '?').toUpperCase();
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityState={{ disabled, expanded }}
+      disabled={disabled}
+      hitSlop={ACTION_HIT_SLOP}
+      onPress={onPress}
+      style={({ pressed }) => [styles.action, disabled ? styles.disabled : undefined,
+        pressed ? styles.pressed : undefined]}>
+      <Text style={[styles.actionText, { color: theme.textSecondary }]}>{label}</Text>
+    </Pressable>
+  );
+}
 
+// Shared layout of server and local rows: indentation, thread line, avatar, texts.
+export function CommentFrame({
+  depth, initial, name, handle, body, meta, children,
+}: {
+  depth: number;
+  initial: string;
+  name: string;
+  handle: string | null;
+  body: string;
+  meta: ReactNode;
+  children?: ReactNode;
+}) {
+  const theme = useTheme();
   return (
     <View style={[styles.row, { paddingLeft: commentIndent(depth) }]}>
       <View
@@ -69,25 +97,70 @@ export const CommentRow = memo(function CommentRow({
             ) : null}
           </View>
           {/* Rendered verbatim: no trim, line breaks and Unicode as stored. */}
-          <Text style={[styles.body, { color: theme.text }]}>{comment.body}</Text>
-          <Text style={[styles.date, { color: theme.textSecondary }]}>
-            {formatCommentTimestamp(comment.createdAt)}
-          </Text>
-          {comment.directRepliesCount > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ expanded: isExpanded }}
-              hitSlop={REPLIES_HIT_SLOP}
-              onPress={() => (isExpanded ? onCollapseReplies(comment.id) : onExpandReplies(comment.id))}
-              style={({ pressed }) => [styles.repliesButton, pressed ? styles.pressed : undefined]}>
-              <Text style={[styles.repliesText, { color: theme.textSecondary }]}>
-                {isExpanded ? 'Ocultar respuestas' : repliesLabel(comment.directRepliesCount)}
-              </Text>
-            </Pressable>
-          ) : null}
+          <Text style={[styles.body, { color: theme.text }]}>{body}</Text>
+          {meta}
+          <View style={styles.actions}>{children}</View>
         </View>
       </View>
     </View>
+  );
+}
+
+type CommentRowProps = {
+  comment: PostComment;
+  depth: number;
+  isExpanded: boolean;
+  // The user's own replies to this comment that no server page contains yet.
+  localRepliesCount: number;
+  // False until the user's pending comments are known (see useOptimisticPostComments).
+  canReply: boolean;
+  onExpandReplies: (commentId: string, hasLocalReplies: boolean) => void;
+  onCollapseReplies: (commentId: string) => void;
+  onReply: (commentId: string, label: string) => void;
+};
+
+export const CommentRow = memo(function CommentRow({
+  comment, depth, isExpanded, localRepliesCount, canReply, onExpandReplies, onCollapseReplies, onReply,
+}: CommentRowProps) {
+  const theme = useTheme();
+  const { username } = comment.author;
+  const displayName = comment.author.displayName?.trim() ? comment.author.displayName : null;
+  const name = displayName ?? (username === null ? 'Usuario' : `@${username}`);
+  const handle = displayName !== null && username !== null ? `@${username}` : null;
+  const initial = (Array.from(displayName?.trim() || username || '?')[0] ?? '?').toUpperCase();
+  const replyLabel = username !== null ? `@${username}` : displayName ?? 'un comentario';
+  const hasReplies = comment.directRepliesCount > 0 || localRepliesCount > 0;
+
+  return (
+    <CommentFrame
+      depth={depth}
+      initial={initial}
+      name={name}
+      handle={handle}
+      body={comment.body}
+      meta={(
+        <Text style={[styles.date, { color: theme.textSecondary }]}>
+          {formatCommentTimestamp(comment.createdAt)}
+        </Text>
+      )}>
+      <CommentAction
+        label="Responder"
+        accessibilityLabel={`Responder a ${replyLabel}`}
+        disabled={!canReply}
+        onPress={() => onReply(comment.id, replyLabel)}
+      />
+      {hasReplies ? (
+        <CommentAction
+          label={isExpanded
+            ? 'Ocultar respuestas'
+            : collapsedRepliesLabel(comment.directRepliesCount, localRepliesCount)}
+          expanded={isExpanded}
+          onPress={() => (isExpanded
+            ? onCollapseReplies(comment.id)
+            : onExpandReplies(comment.id, localRepliesCount > 0))}
+        />
+      ) : null}
+    </CommentFrame>
   );
 });
 
@@ -103,7 +176,9 @@ const styles = StyleSheet.create({
   handle: { flexShrink: 1, fontSize: 12, lineHeight: 18 },
   body: { fontSize: 14, lineHeight: 20 },
   date: { fontSize: 12, lineHeight: 18 },
-  repliesButton: { alignSelf: 'flex-start', justifyContent: 'center', minHeight: 44 },
-  repliesText: { fontSize: 13, fontWeight: '600' },
+  actions: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', columnGap: 18 },
+  action: { justifyContent: 'center', minHeight: 44 },
+  actionText: { fontSize: 13, fontWeight: '600' },
+  disabled: { opacity: 0.45 },
   pressed: { opacity: 0.7 },
 });

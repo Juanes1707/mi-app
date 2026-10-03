@@ -1,16 +1,21 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
-  ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, type ListRenderItem,
+  ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View,
+  type ListRenderItem,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BottomTabInset } from '@/constants/theme';
+import { useAuth } from '@/features/auth/presentation/hooks/use-auth';
 import { isUuid } from '@/features/comments/domain/post-comment-values';
 import type { PostCommentsErrorCode } from '@/features/comments/domain/post-comments-error';
-import type { VisibleCommentRow } from '@/features/comments/presentation/comment-tree';
+import { flattenVisibleRows, type VisibleCommentRow } from '@/features/comments/presentation/comment-tree';
 import { CommentBranchStatusRow } from '@/features/comments/presentation/components/comment-branch-status-row';
+import { CommentComposer } from '@/features/comments/presentation/components/comment-composer';
 import { CommentRow } from '@/features/comments/presentation/components/comment-row';
+import { LocalCommentRow } from '@/features/comments/presentation/components/local-comment-row';
+import { useOptimisticPostComments } from '@/features/comments/presentation/hooks/use-optimistic-post-comments';
 import { usePostComments } from '@/features/comments/presentation/hooks/use-post-comments';
+import { normalizeUuid } from '@/features/offline-sync/domain/uuid';
 import { useTheme } from '@/hooks/use-theme';
 
 const ROOT_ERROR_MESSAGES: Record<PostCommentsErrorCode, string> = {
@@ -46,81 +51,155 @@ export function PostCommentsScreen({ postId }: PostCommentsScreenProps) {
 
 function PostComments({ postId }: { postId: string }) {
   const theme = useTheme();
+  // Owner from the in-memory auth state: no auth/network round trip per send.
+  const { user } = useAuth();
+  const ownerUserId = user === null ? null : normalizeUuid(user.id);
   const {
-    root, rows, isRefreshing, refreshError,
-    expandReplies, collapseReplies, continueReplies, loadMoreRoots, retryRoots, refresh,
+    tree, root, isRefreshing, refreshError,
+    expandReplies, collapseReplies, continueReplies, loadMoreRoots, retryRoots, refresh, catchUpBranches,
   } = usePostComments(postId);
+  const onReplyCreated = useCallback(
+    (parentCommentId: string) => expandReplies(parentCommentId, { localChildren: true }),
+    [expandReplies],
+  );
+  // Server browsing and the local projection load independently: comments can be
+  // read (and the overlay shown) even while the other side is loading or failed.
+  const local = useOptimisticPostComments({
+    ownerUserId, postId, tree, onCommentsSynced: catchUpBranches, onReplyCreated,
+  });
+  const { startReply, retryLocal, discardLocal } = local;
+  const canInteract = local.status === 'ready';
 
-  // Rows carry their comment, so this callback only changes if the actions do.
-  const renderRow: ListRenderItem<VisibleCommentRow> = useCallback(({ item }) => (
-    item.kind === 'comment' ? (
-      <CommentRow
-        comment={item.comment}
-        depth={item.depth}
-        isExpanded={item.isExpanded}
-        onExpandReplies={expandReplies}
-        onCollapseReplies={collapseReplies}
-      />
-    ) : (
-      <CommentBranchStatusRow
-        branchKey={item.branchKey}
-        depth={item.depth}
-        status={item.status}
-        error={item.error}
-        onContinue={continueReplies}
-      />
-    )
-  ), [expandReplies, collapseReplies, continueReplies]);
+  // Server tree + local overlay → one flat list of rows for one FlatList.
+  const rows = useMemo(() => flattenVisibleRows(tree, local.overlay), [tree, local.overlay]);
 
-  if (root === null || (!root.loaded && root.status === 'loading')) {
-    return (
-      <SafeAreaView edges={['bottom']} style={[styles.centered, { backgroundColor: theme.background }]}>
-        <ActivityIndicator color={theme.text} size="large" />
-        <Feedback message="Cargando comentarios..." />
-      </SafeAreaView>
-    );
+  const expand = useCallback(
+    (commentId: string, hasLocalReplies: boolean) => expandReplies(commentId, { localChildren: hasLocalReplies }),
+    [expandReplies],
+  );
+  const replyToServer = useCallback(
+    (commentId: string, label: string) => startReply({ commentId, label, source: 'server' }),
+    [startReply],
+  );
+  const replyToLocal = useCallback(
+    (commentId: string, label: string) => startReply({ commentId, label, source: 'local' }),
+    [startReply],
+  );
+
+  const renderRow: ListRenderItem<VisibleCommentRow> = useCallback(({ item }) => {
+    switch (item.kind) {
+      case 'comment':
+        return (
+          <CommentRow
+            comment={item.comment}
+            depth={item.depth}
+            isExpanded={item.isExpanded}
+            localRepliesCount={item.localRepliesCount}
+            canReply={canInteract}
+            onExpandReplies={expand}
+            onCollapseReplies={collapseReplies}
+            onReply={replyToServer}
+          />
+        );
+      case 'local':
+        return (
+          <LocalCommentRow
+            local={item.local}
+            depth={item.depth}
+            isExpanded={item.isExpanded}
+            localRepliesCount={item.localRepliesCount}
+            isOrphan={item.isOrphan}
+            canInteract={canInteract}
+            onExpandReplies={expand}
+            onCollapseReplies={collapseReplies}
+            onReply={replyToLocal}
+            onRetry={retryLocal}
+            onDiscard={discardLocal}
+          />
+        );
+      case 'branch-status':
+        return (
+          <CommentBranchStatusRow
+            branchKey={item.branchKey}
+            depth={item.depth}
+            status={item.status}
+            error={item.error}
+            onContinue={continueReplies}
+          />
+        );
+    }
+  }, [canInteract, expand, collapseReplies, replyToServer, replyToLocal, retryLocal, discardLocal, continueReplies]);
+
+  // The post itself is gone or hidden: nothing of it (server or local) is shown.
+  if (root !== null && !root.loaded && root.error === 'post-not-found') {
+    return <CenteredFeedback message={ROOT_ERROR_MESSAGES['post-not-found']} />;
   }
-  if (!root.loaded) {
-    const error = root.error ?? 'unavailable';
-    return (
-      <CenteredFeedback
-        message={ROOT_ERROR_MESSAGES[error]}
-        onRetry={error === 'post-not-found' ? undefined : retryRoots}
-      />
-    );
-  }
 
+  const rootLoaded = root?.loaded === true;
   return (
-    <SafeAreaView
-      edges={['bottom', 'left', 'right']}
-      style={[styles.screen, { backgroundColor: theme.background }]}>
-      {/* One virtualized list for the whole tree: replies are rows, not nested lists. */}
-      <FlatList
-        contentContainerStyle={styles.listContent}
-        data={rows}
-        keyExtractor={getRowKey}
-        renderItem={renderRow}
-        ListHeaderComponent={refreshError !== null ? (
-          <Feedback message={REFRESH_ERROR_MESSAGES[refreshError]} onRetry={refresh} />
-        ) : null}
-        ListEmptyComponent={root.nextCursor === null
-          ? <Feedback message="Todavía no hay comentarios." />
-          : null}
-        ListFooterComponent={root.status === 'loading-more' ? (
-          <View style={styles.feedback}>
-            <ActivityIndicator color={theme.text} />
-            <Text style={[styles.statusText, { color: theme.textSecondary }]}>
-              Cargando más comentarios...
-            </Text>
-          </View>
-        ) : root.status === 'error' ? (
-          <Feedback message="No pudimos cargar más comentarios." onRetry={retryRoots} />
-        ) : null}
-        onEndReached={loadMoreRoots}
-        onEndReachedThreshold={0.5}
-        onRefresh={refresh}
-        refreshing={isRefreshing}
-      />
+    <SafeAreaView edges={['left', 'right']} style={[styles.screen, { backgroundColor: theme.background }]}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
+        {/* One virtualized list for the whole tree: replies are rows, not nested lists. */}
+        <FlatList
+          contentContainerStyle={styles.listContent}
+          data={rows}
+          keyboardShouldPersistTaps="handled"
+          keyExtractor={getRowKey}
+          renderItem={renderRow}
+          ListHeaderComponent={(
+            <>
+              {local.status === 'error' ? (
+                <Feedback
+                  message="No pudimos cargar tus comentarios pendientes."
+                  onRetry={local.retryPendingLoad}
+                />
+              ) : null}
+              {refreshError !== null ? (
+                <Feedback message={REFRESH_ERROR_MESSAGES[refreshError]} onRetry={refresh} />
+              ) : null}
+              {!rootLoaded && (root === null || root.status === 'loading') ? (
+                <View style={styles.feedback}>
+                  <ActivityIndicator color={theme.text} />
+                  <Text style={[styles.statusText, { color: theme.textSecondary }]}>
+                    Cargando comentarios...
+                  </Text>
+                </View>
+              ) : null}
+              {!rootLoaded && root !== null && root.status === 'error' ? (
+                <Feedback message={ROOT_ERROR_MESSAGES[root.error ?? 'unavailable']} onRetry={retryRoots} />
+              ) : null}
+            </>
+          )}
+          ListEmptyComponent={rootLoaded && root.nextCursor === null
+            ? <Feedback message="Todavía no hay comentarios." />
+            : null}
+          ListFooterComponent={root?.status === 'loading-more' && rootLoaded ? (
+            <View style={styles.feedback}>
+              <ActivityIndicator color={theme.text} />
+              <Text style={[styles.statusText, { color: theme.textSecondary }]}>
+                Cargando más comentarios...
+              </Text>
+            </View>
+          ) : rootLoaded && root.status === 'error' ? (
+            <Feedback message="No pudimos cargar más comentarios." onRetry={retryRoots} />
+          ) : null}
+          onEndReached={loadMoreRoots}
+          onEndReachedThreshold={0.5}
+          onRefresh={rootLoaded ? refresh : retryRoots}
+          refreshing={isRefreshing}
+        />
+        <CommentComposer
+          value={local.draft}
+          onChangeText={local.setDraft}
+          editable={canInteract}
+          canSend={local.canSend}
+          onSend={local.send}
+          codePoints={local.codePoints}
+          bodyIssue={local.bodyIssue}
+          replyLabel={local.replyTarget?.label ?? null}
+          onCancelReply={local.cancelReply}
+        />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -154,9 +233,7 @@ function Feedback({ message, onRetry }: { message: string; onRetry?: () => void 
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  listContent: {
-    alignSelf: 'center', paddingBottom: BottomTabInset + 24, width: '100%', maxWidth: 640,
-  },
+  listContent: { alignSelf: 'center', paddingBottom: 24, width: '100%', maxWidth: 640 },
   centered: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: 24 },
   feedback: { alignItems: 'center', gap: 12, padding: 20 },
   statusText: { fontSize: 14, lineHeight: 20, textAlign: 'center' },

@@ -8,6 +8,7 @@ import {
   type PostCommentsErrorCode,
 } from '@/features/comments/domain/post-comments-error';
 import {
+  abortCatchUp,
   applyBranchPage,
   type BranchRequest,
   type BranchStart,
@@ -15,8 +16,8 @@ import {
   createCommentTree,
   expandComment,
   failBranchLoad,
-  flattenVisibleRows,
   ROOT_BRANCH,
+  startCatchUp,
   startFirstPage,
   startNextPage,
   type CommentTree,
@@ -103,7 +104,12 @@ export function usePostComments(postId: string) {
           return;
         }
         const latest = stateRef.current;
-        publish({ ...latest, tree: failBranchLoad(latest.tree, request, code) });
+        publish({
+          ...latest,
+          tree: request.catchUp === true
+            ? abortCatchUp(latest.tree, request)
+            : failBranchLoad(latest.tree, request, code),
+        });
       },
     );
     return true;
@@ -119,19 +125,32 @@ export function usePostComments(postId: string) {
     };
   }, [postId, launch, publish]);
 
-  const expandReplies = useCallback((commentId: string) => {
+  // `localChildren`: the user has local replies here (shown without any request).
+  const expandReplies = useCallback((commentId: string, options?: { localChildren?: boolean }) => {
     if (!mountedRef.current) return;
     const current = stateRef.current;
     const comment = current.tree.nodes.get(commentId);
-    // Only on demand, and only where the server counted direct replies.
-    if (comment === undefined || comment.directRepliesCount === 0) return;
+    // Server pages only on demand, and only where the server counted direct replies.
+    const hasServerReplies = comment !== undefined && comment.directRepliesCount > 0;
+    if (!hasServerReplies && options?.localChildren !== true) return;
     const tree = expandComment(current.tree, commentId);
     const expanded = { ...current, tree };
     // Never loaded (or first page failed): request it. Loading or loaded: reuse.
-    if (!launch(expanded, startFirstPage(tree, commentId)) && tree !== current.tree) {
+    const started = hasServerReplies ? startFirstPage(tree, commentId) : null;
+    if (!launch(expanded, started) && tree !== current.tree) {
       publish(expanded);
     }
   }, [launch, publish]);
+
+  // Called when some of the user's comments of this post left the sync queue: each
+  // fully loaded branch they belong to checks its tail (see startCatchUp).
+  const catchUpBranches = useCallback((targetPostId: string, branchKeys: readonly string[]) => {
+    if (!mountedRef.current || stateRef.current.tree.postId !== targetPostId) return;
+    for (const key of new Set(branchKeys)) {
+      const current = stateRef.current;
+      launch(current, startCatchUp(current.tree, key));
+    }
+  }, [launch]);
 
   const collapseReplies = useCallback((commentId: string) => {
     if (!mountedRef.current) return;
@@ -206,15 +225,16 @@ export function usePostComments(postId: string) {
 
   // Between a postId change and the effect that resets the tree, never expose
   // the previous post's comments.
+  // The server tree only: the screen flattens it together with the local overlay.
   const isCurrentPost = state.tree.postId === postId;
-  const rows = useMemo(
-    () => (isCurrentPost ? flattenVisibleRows(state.tree) : []),
-    [isCurrentPost, state.tree],
+  const tree = useMemo(
+    () => (isCurrentPost ? state.tree : createCommentTree(postId)),
+    [isCurrentPost, state.tree, postId],
   );
 
   return {
-    root: isCurrentPost ? state.tree.branches.get(ROOT_BRANCH) ?? null : null,
-    rows,
+    tree,
+    root: tree.branches.get(ROOT_BRANCH) ?? null,
     isRefreshing: isCurrentPost && state.isRefreshing,
     refreshError: isCurrentPost ? state.refreshError : null,
     expandReplies,
@@ -223,5 +243,6 @@ export function usePostComments(postId: string) {
     loadMoreRoots,
     retryRoots,
     refresh,
+    catchUpBranches,
   };
 }
