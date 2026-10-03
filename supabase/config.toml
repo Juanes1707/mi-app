@@ -30,3 +30,6 @@ verify_jwt = true
 
 [functions.post-media-read]
 verify_jwt = true
+
+[functions.post-likes]
+verify_jwt = true
