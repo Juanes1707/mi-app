@@ -18,7 +18,7 @@ export type BackendApiRequestOptions = {
 };
 
 type BackendRequest = BackendApiRequestOptions & {
-  method: 'GET' | 'POST' | 'PATCH';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH';
   body?: unknown;
 };
 
@@ -48,6 +48,18 @@ export class BackendApiClient {
   ): Promise<TResponse> {
     return this.request<TResponse>(path, {
       method: 'POST',
+      body,
+      ...options,
+    });
+  }
+
+  put<TResponse, TBody>(
+    path: string,
+    body: TBody,
+    options?: BackendApiRequestOptions,
+  ): Promise<TResponse> {
+    return this.request<TResponse>(path, {
+      method: 'PUT',
       body,
       ...options,
     });

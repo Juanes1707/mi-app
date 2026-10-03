@@ -3,6 +3,7 @@ import {
   BackendApiClient,
   type BackendApiRequestOptions,
 } from '@/infrastructure/api/backend-api-client';
+import { readUnverifiedJwtSubject } from '@/infrastructure/api/jwt-subject';
 
 export type AuthenticatedBackendRequestOptions = Omit<
   BackendApiRequestOptions,
@@ -13,6 +14,15 @@ export class AuthenticationRequiredError extends Error {
   constructor() {
     super('An authenticated session is required to call this backend operation.');
     this.name = 'AuthenticationRequiredError';
+  }
+}
+
+// The session's token belongs to a different user than the one the request was
+// bound to (e.g. account switched while queued work was being replayed).
+export class AuthenticatedUserMismatchError extends Error {
+  constructor() {
+    super('The current session does not belong to the expected user.');
+    this.name = 'AuthenticatedUserMismatchError';
   }
 }
 
@@ -55,6 +65,33 @@ export class AuthenticatedBackendApiClient {
     const accessToken = await this.requireAccessToken();
 
     return this.backendApiClient.patch<TResponse, TBody>(path, body, {
+      ...options,
+      accessToken,
+    });
+  }
+
+  // PUT bound to an expected user: the token is read ONCE, its subject is checked
+  // against `expectedUserId`, and that very same token is the one sent. There is no
+  // second token lookup in which a different session could slip in. The expected
+  // user is never sent: the backend still derives the actor from the verified JWT.
+  async putAsUser<TResponse, TBody>(
+    expectedUserId: string,
+    path: string,
+    body: TBody,
+    options?: AuthenticatedBackendRequestOptions,
+  ): Promise<TResponse> {
+    const accessToken = await this.requireAccessToken();
+    const subject = readUnverifiedJwtSubject(accessToken);
+
+    if (subject === null) {
+      throw new AuthenticationRequiredError();
+    }
+
+    if (subject !== expectedUserId.toLowerCase()) {
+      throw new AuthenticatedUserMismatchError();
+    }
+
+    return this.backendApiClient.put<TResponse, TBody>(path, body, {
       ...options,
       accessToken,
     });
