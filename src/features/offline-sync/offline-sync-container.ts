@@ -5,6 +5,7 @@ import { AppState } from 'react-native';
 import { authProviderDependencies } from '@/features/auth/auth-container';
 import { OfflineSyncCoordinator } from '@/features/offline-sync/application/offline-sync-coordinator';
 import { OfflineMutationProcessor } from '@/features/offline-sync/application/offline-mutation-processor';
+import { OfflineMutationResolutionSignal } from '@/features/offline-sync/application/offline-mutation-resolution-signal';
 import { OfflineSyncOrchestrator } from '@/features/offline-sync/application/offline-sync-orchestrator';
 import { OwnerReconciliationSignal } from '@/features/offline-sync/application/owner-reconciliation-signal';
 import {
@@ -43,9 +44,12 @@ const offlineMutationProcessor = new OfflineMutationProcessor(
 );
 
 export const offlineSyncReconciliation = new OwnerReconciliationSignal();
+// How each finished queue entry ended (confirmed vs terminal not-found), per owner.
+export const offlineMutationResolutions = new OfflineMutationResolutionSignal();
 export const offlineSyncOrchestrator = new OfflineSyncOrchestrator(
   offlineMutationProcessor,
   offlineSyncReconciliation,
+  offlineMutationResolutions,
 );
 export const offlineSyncCoordinator = new OfflineSyncCoordinator(
   {

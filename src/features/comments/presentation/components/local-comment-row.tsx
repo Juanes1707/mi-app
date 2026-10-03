@@ -12,7 +12,11 @@ const STATUS_LABELS: Record<LocalCommentStatus, string> = {
   // Durable on the device. Also shown while sync is blocked (offline, server error,
   // conflict): the intention is kept and retried by later sync events.
   pending: 'Pendiente',
+  // Left the queue without a known outcome yet: never claimed as sent.
+  resolving: 'Pendiente',
   sent: 'Enviado',
+  // Neutral on purpose: after a lost 201 a 404 replay is possible, so it may exist.
+  terminal: 'Ya no se puede sincronizar este comentario.',
   'save-error': 'No se pudo guardar',
 };
 
@@ -63,6 +67,9 @@ export const LocalCommentRow = memo(function LocalCommentRow({
           <CommentAction label="Reintentar" onPress={() => onRetry(local.commentId)} />
           <CommentAction label="Descartar" onPress={() => onDiscard(local.commentId)} />
         </>
+      ) : local.status === 'terminal' ? (
+        // The processor already finished it: no retry, only the local copy goes.
+        <CommentAction label="Descartar" onPress={() => onDiscard(local.commentId)} />
       ) : (
         <CommentAction
           label="Responder"

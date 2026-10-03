@@ -4,6 +4,7 @@ import {
   type QueuedSetPostLikeMutation,
 } from '@/features/offline-sync/domain/offline-mutation';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
+import type { CompletedOfflineMutation } from '@/features/offline-sync/domain/offline-mutation-resolution';
 import { OfflineSyncError } from '@/features/offline-sync/domain/offline-sync-error';
 import type { PostCommentRemoteGateway } from '@/features/offline-sync/domain/post-comment-remote-gateway';
 import type { PostLikeRemoteGateway } from '@/features/offline-sync/domain/post-like-remote-gateway';
@@ -24,34 +25,45 @@ export type DrainBlockReason =
   // A terminal mutation could not be removed as expected: an invariant is broken.
   | 'queue-inconsistent';
 
+// Every variant reports the mutations this run actually finished, in sequence order:
+// one entry per successfully removed row, so processedCount === completedMutations.length.
+type DrainProgress = {
+  processedCount: number;
+  completedMutations: readonly CompletedOfflineMutation[];
+};
+
 export type OfflineMutationDrainResult =
-  | { kind: 'drained'; ownerUserId: string; processedCount: number }
-  | { kind: 'not-authenticated'; ownerUserId: string | null; processedCount: number }
+  | ({ kind: 'drained'; ownerUserId: string } & DrainProgress)
+  | ({ kind: 'not-authenticated'; ownerUserId: string | null } & DrainProgress)
   // The session now belongs to another user: the previous owner's queue is left as is.
-  | { kind: 'session-changed'; ownerUserId: string; processedCount: number }
+  | ({ kind: 'session-changed'; ownerUserId: string } & DrainProgress)
   // `sequence` is null when the blocking entry could not be identified (e.g. unreadable row).
-  | {
+  | ({
       kind: 'blocked';
       ownerUserId: string | null;
-      processedCount: number;
       sequence: number | null;
       reason: DrainBlockReason;
-    };
+    } & DrainProgress);
 
 type CurrentUserRead =
   | { kind: 'user'; id: string }
   | { kind: 'signed-out' }
   | { kind: 'unavailable' };
 
-type SendOutcome = 'terminal' | 'signed-out' | DrainBlockReason;
+// A terminal remote outcome carries the resolution it will publish once removed.
+type SendOutcome = { completed: CompletedOfflineMutation } | 'signed-out' | DrainBlockReason;
+
+function progress(completed: readonly CompletedOfflineMutation[]): DrainProgress {
+  return { processedCount: completed.length, completedMutations: [...completed] };
+}
 
 function blocked(
   ownerUserId: string | null,
-  processedCount: number,
+  completed: readonly CompletedOfflineMutation[],
   sequence: number | null,
   reason: DrainBlockReason,
 ): OfflineMutationDrainResult {
-  return { kind: 'blocked', ownerUserId, processedCount, sequence, reason };
+  return { kind: 'blocked', ownerUserId, sequence, reason, ...progress(completed) };
 }
 
 function queueFailureReason(error: unknown): DrainBlockReason {
@@ -89,26 +101,26 @@ export class OfflineMutationProcessor {
   }
 
   private async drain(): Promise<OfflineMutationDrainResult> {
+    const completed: CompletedOfflineMutation[] = [];
     const start = await this.readCurrentUser();
-    if (start.kind === 'unavailable') return blocked(null, 0, null, 'unavailable');
+    if (start.kind === 'unavailable') return blocked(null, completed, null, 'unavailable');
     if (start.kind === 'signed-out') {
-      return { kind: 'not-authenticated', ownerUserId: null, processedCount: 0 };
+      return { kind: 'not-authenticated', ownerUserId: null, ...progress(completed) };
     }
     const owner = start.id;
-    let processedCount = 0;
 
     for (;;) {
       // Before every new entry: the session must still belong to the queue's owner.
-      if (processedCount > 0) {
+      if (completed.length > 0) {
         const current = await this.readCurrentUser();
         if (current.kind === 'unavailable') {
-          return blocked(owner, processedCount, null, 'unavailable');
+          return blocked(owner, completed, null, 'unavailable');
         }
         if (current.kind === 'signed-out') {
-          return { kind: 'not-authenticated', ownerUserId: owner, processedCount };
+          return { kind: 'not-authenticated', ownerUserId: owner, ...progress(completed) };
         }
         if (current.id !== owner) {
-          return { kind: 'session-changed', ownerUserId: owner, processedCount };
+          return { kind: 'session-changed', ownerUserId: owner, ...progress(completed) };
         }
       }
 
@@ -117,16 +129,16 @@ export class OfflineMutationProcessor {
       try {
         mutation = await this.queue.peekOldest(owner);
       } catch (error: unknown) {
-        return blocked(owner, processedCount, null, queueFailureReason(error));
+        return blocked(owner, completed, null, queueFailureReason(error));
       }
-      if (mutation === null) return { kind: 'drained', ownerUserId: owner, processedCount };
+      if (mutation === null) return { kind: 'drained', ownerUserId: owner, ...progress(completed) };
 
       const outcome = await this.send(owner, mutation);
       if (outcome === 'signed-out') {
-        return { kind: 'not-authenticated', ownerUserId: owner, processedCount };
+        return { kind: 'not-authenticated', ownerUserId: owner, ...progress(completed) };
       }
-      if (outcome !== 'terminal') {
-        return blocked(owner, processedCount, mutation.sequence, outcome);
+      if (typeof outcome === 'string') {
+        return blocked(owner, completed, mutation.sequence, outcome);
       }
 
       // Removed only after a terminal remote outcome. If the app dies before this line,
@@ -136,12 +148,14 @@ export class OfflineMutationProcessor {
       try {
         removed = await this.queue.remove(owner, mutation.sequence);
       } catch {
-        return blocked(owner, processedCount, mutation.sequence, 'unavailable');
+        return blocked(owner, completed, mutation.sequence, 'unavailable');
       }
       if (!removed) {
-        return blocked(owner, processedCount, mutation.sequence, 'queue-inconsistent');
+        return blocked(owner, completed, mutation.sequence, 'queue-inconsistent');
       }
-      processedCount += 1;
+      // Only now is the mutation resolved locally: a row that is still in SQLite will
+      // be replayed, so reporting it as finished would be false.
+      completed.push(outcome.completed);
     }
   }
 
@@ -170,8 +184,17 @@ export class OfflineMutationProcessor {
     try {
       const result = await this.postLikes.setLike({ expectedOwnerUserId: owner, postId, liked });
       if (result.kind === 'profile-not-ready') return 'profile-not-ready';
+      if (result.postId !== postId) return 'invalid-response';
       // `updated` and the contractual `not-found` both finish this command.
-      return result.postId === postId ? 'terminal' : 'invalid-response';
+      return {
+        completed: {
+          sequence: mutation.sequence,
+          ownerUserId: owner,
+          kind: SET_POST_LIKE,
+          entityKey: mutation.entityKey,
+          outcome: result.kind === 'updated' ? 'confirmed' : 'not-found',
+        },
+      };
     } catch (error: unknown) {
       return this.classifyFailure(error);
     }
@@ -182,6 +205,17 @@ export class OfflineMutationProcessor {
     mutation: QueuedCreatePostCommentMutation,
   ): Promise<SendOutcome> {
     const { commentId, postId, parentCommentId, body } = mutation.payload;
+    const finished = (
+      outcome: 'confirmed' | 'post-not-found' | 'parent-not-found',
+    ): SendOutcome => ({
+      completed: {
+        sequence: mutation.sequence,
+        ownerUserId: owner,
+        kind: CREATE_POST_COMMENT,
+        entityKey: mutation.entityKey,
+        outcome,
+      },
+    });
     try {
       const result = await this.postComments.createComment({
         expectedOwnerUserId: owner, commentId, postId, parentCommentId, body,
@@ -189,12 +223,13 @@ export class OfflineMutationProcessor {
       switch (result.kind) {
         // Created now or an exact replay of an earlier send: either way it exists.
         case 'confirmed':
-          return normalizeUuid(result.comment.id) === commentId ? 'terminal' : 'invalid-response';
-        // The comment can never be applied (post gone or hidden, parent gone or under
-        // another post): finished, so it does not block the queue forever.
+          return normalizeUuid(result.comment.id) === commentId ? finished('confirmed') : 'invalid-response';
+        // The comment can never be applied by this actor (post gone or hidden, parent
+        // gone or under another post): finished, so it does not block the queue forever.
         case 'post-not-found':
+          return finished('post-not-found');
         case 'parent-not-found':
-          return 'terminal';
+          return finished('parent-not-found');
         case 'profile-not-ready':
           return 'profile-not-ready';
       }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
-  canReplyToLocal, discardLocal, isCanonicalMatch, markLocalDurable, markLocalSaveError, markLocalSaving,
-  mergePendingProjection, pruneCanonicalSent, type CommentOverlay, type LocalComment,
+  applyResolutions, canReplyToLocal, discardLocal, isCanonicalMatch, markLocalDurable, markLocalSaveError,
+  markLocalSaving, mergePendingProjection, pruneCanonicalResolved, type CommentOverlay, type CommentResolution,
+  type LocalComment,
 } from '@/features/comments/presentation/comment-overlay';
 import { ROOT_BRANCH, type CommentTree } from '@/features/comments/presentation/comment-tree';
 import {
@@ -10,7 +11,7 @@ import {
 } from '@/features/offline-sync/domain/post-comment-body';
 import type { PendingPostComment } from '@/features/offline-sync/domain/post-comment-projection';
 import {
-  createPostCommentId, getPendingPostCommentProjection, offlineSyncOrchestrator,
+  createPostCommentId, getPendingPostCommentProjection, offlineMutationResolutions, offlineSyncOrchestrator,
   offlineSyncReconciliation, queueCreatePostComment,
 } from '@/features/offline-sync/offline-sync-container';
 
@@ -100,24 +101,38 @@ export function useOptimisticPostComments({
     [commit],
   );
 
-  const applyProjection = useCallback((pending: PendingPostComment[], requestId: number) => {
-    let sent: LocalComment[] = [];
-    commit((current) => {
-      const merged = mergePendingProjection(
-        current.entries, pending, requestId, () => ++nextLocalOrderRef.current,
-      );
-      sent = merged.sent;
-      const entries = pruneCanonicalSent(merged.entries, treeRef.current.nodes, current.owner);
-      if (entries === current.entries && current.status === 'ready') return current;
-      return { ...current, status: 'ready', entries };
-    });
+  // How the processor finished a comment of the CURRENT owner, if it is still in the
+  // in-memory resolution window. Leaving the queue alone proves nothing.
+  const resolveComment = useCallback((commentId: string): CommentResolution | null => {
+    const owner = stateRef.current.owner;
+    if (owner === null) return null;
+    const event = offlineMutationResolutions.find(owner, 'create-post-comment', commentId);
+    return event !== null && event.kind === 'create-post-comment' ? event.outcome : null;
+  }, []);
+
+  // Comments CONFIRMED just now may be revealed by their fully loaded branch.
+  const catchUpSent = useCallback((sent: readonly LocalComment[]) => {
     const { owner, postId: target } = stateRef.current;
     const nodes = treeRef.current.nodes;
     const branchKeys = sent
       .filter((entry) => !isCanonicalMatch(entry, nodes.get(entry.commentId), owner))
       .map((entry) => entry.parentCommentId ?? ROOT_BRANCH);
     if (branchKeys.length > 0) callbacksRef.current.onCommentsSynced(target, branchKeys);
-  }, [commit]);
+  }, []);
+
+  const applyProjection = useCallback((pending: PendingPostComment[], requestId: number) => {
+    let sent: LocalComment[] = [];
+    commit((current) => {
+      const merged = mergePendingProjection(
+        current.entries, pending, requestId, () => ++nextLocalOrderRef.current, resolveComment,
+      );
+      sent = merged.sent;
+      const entries = pruneCanonicalResolved(merged.entries, treeRef.current.nodes, current.owner);
+      if (entries === current.entries && current.status === 'ready') return current;
+      return { ...current, status: 'ready', entries };
+    });
+    catchUpSent(sent);
+  }, [catchUpSent, commit, resolveComment]);
 
   // One read of the owner's queue at a time; reads requested meanwhile collapse into
   // one trailing read. A failure deletes nothing: a trustworthy overlay is kept as is,
@@ -172,7 +187,8 @@ export function useOptimisticPostComments({
   }, [ownerUserId, postId, commit, loadProjection]);
 
   // A sync finished for this owner (it may have been a like): re-read the pending
-  // comments. Comments that left the queue become 'sent' (see mergePendingProjection).
+  // comments. Those that left the queue take the outcome the processor recorded (the
+  // orchestrator publishes resolutions BEFORE this signal; see mergePendingProjection).
   useEffect(() => {
     if (ownerUserId === null) return undefined;
     const generation = generationRef.current;
@@ -184,10 +200,29 @@ export function useOptimisticPostComments({
     });
   }, [ownerUserId, postId, loadProjection]);
 
-  // A server page now contains a sent comment: the canonical row replaces it.
+  // Resolutions published after a read already saw a comment leave the queue
+  // ('resolving'): settle it without reading SQLite again. Owner-scoped: another
+  // owner's resolutions never reach this subscription.
+  useEffect(() => {
+    if (ownerUserId === null) return undefined;
+    const generation = generationRef.current;
+    return offlineMutationResolutions.subscribe(ownerUserId, () => {
+      if (!mountedRef.current || generation !== generationRef.current) return;
+      let sent: LocalComment[] = [];
+      commitEntries((entries) => {
+        const resolved = applyResolutions(entries, resolveComment);
+        sent = resolved.sent;
+        return resolved.entries;
+      });
+      catchUpSent(sent);
+    });
+  }, [ownerUserId, postId, catchUpSent, commitEntries, resolveComment]);
+
+  // A server page now contains a comment that left the queue: the canonical row
+  // replaces it (also a terminal one: a lost 201 followed by a 404 replay).
   useEffect(() => {
     treeRef.current = tree;
-    commitEntries((entries) => pruneCanonicalSent(entries, tree.nodes, stateRef.current.owner));
+    commitEntries((entries) => pruneCanonicalResolved(entries, tree.nodes, stateRef.current.owner));
   }, [tree, commitEntries]);
 
   const retryPendingLoad = useCallback(() => {
@@ -299,7 +334,8 @@ export function useOptimisticPostComments({
     persist(current.owner, entry);
   }, [commitEntries, persist]);
 
-  // Only an intention SQLite never stored; nothing is sent to the backend.
+  // Only the local copy of an intention that is not in SQLite (save-error, terminal);
+  // nothing is sent to the backend and nothing is deleted from SQLite.
   const discardLocalComment = useCallback((commentId: string) => {
     commitEntries((entries) => discardLocal(entries, commentId));
   }, [commitEntries]);
