@@ -175,14 +175,13 @@ function hasReadableMetadata(
   );
 }
 
-// The signed URL must be an absolute http(s) URL that points at exactly the
-// authorized object and carries a token; anything else fails closed.
-function parseSignedUrl(value: unknown, imagePath: string): string | null {
+// Storage builds the capability from the authorized imagePath; we only check
+// the shape we consume, not Storage's internal URL layout.
+function parseSignedUrl(value: unknown): string | null {
   if (
     !isRecord(value) ||
     typeof value.signedUrl !== 'string' ||
-    value.signedUrl.trim() !== value.signedUrl ||
-    value.signedUrl === ''
+    value.signedUrl.trim() === ''
   ) {
     return null;
   }
@@ -195,17 +194,10 @@ function parseSignedUrl(value: unknown, imagePath: string): string | null {
     return null;
   }
 
-  const token = signedUrl.searchParams.get('token');
-
   if (
     (signedUrl.protocol !== 'https:' && signedUrl.protocol !== 'http:') ||
     signedUrl.username !== '' ||
-    signedUrl.password !== '' ||
-    !signedUrl.pathname.endsWith(
-      `/object/sign/${POST_MEDIA_BUCKET}/${imagePath}`,
-    ) ||
-    token === null ||
-    token === ''
+    signedUrl.password !== ''
   ) {
     return null;
   }
@@ -279,7 +271,7 @@ export default {
       return postMediaReadFailedResponse();
     }
 
-    const signedUrl = parseSignedUrl(signedUrlData, authorizedMedia.imagePath);
+    const signedUrl = parseSignedUrl(signedUrlData);
 
     if (!signedUrl) {
       console.error('Storage returned an invalid signed post media URL.');
