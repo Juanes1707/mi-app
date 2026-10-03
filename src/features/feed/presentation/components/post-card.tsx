@@ -1,140 +1,80 @@
-import { SymbolView } from 'expo-symbols';
 import { memo } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { Post } from '@/features/feed/domain/entities/post';
-import { PostImage } from '@/features/feed/presentation/components/post-image';
+import type { FeedPost } from '@/features/feed/domain/entities/feed-post';
 import { useTheme } from '@/hooks/use-theme';
 
-type PostCardProps = {
-  post: Post;
-};
-
 const dateFormatter = new Intl.DateTimeFormat('es-CO', {
-  day: 'numeric',
-  month: 'long',
+  day: 'numeric', month: 'long', year: 'numeric',
 });
 
-export const PostCard = memo(function PostCard({ post }: PostCardProps) {
+export const PostCard = memo(function PostCard({
+  post, onOpenAuthor,
+}: { post: FeedPost; onOpenAuthor: (profileId: string) => void }) {
   const theme = useTheme();
-  const publishedAt = dateFormatter.format(new Date(post.createdAt));
+  const username = post.author.username?.trim();
+  const name = post.author.displayName?.trim() || username || 'Usuario';
+  const initial = [...(post.author.displayName?.trim() || username || '?')][0].toUpperCase();
 
   return (
     <View style={[styles.card, { backgroundColor: theme.background }]}>
-      <View style={styles.header}>
-        <Image
-          accessibilityLabel={`Foto de perfil de ${post.author.displayName}`}
-          source={{ uri: post.author.avatarUrl }}
-          style={styles.avatar}
-        />
-        <View style={styles.authorText}>
-          <Text numberOfLines={1} style={[styles.username, { color: theme.text }]}>
-            {post.author.username}
-          </Text>
-          <Text numberOfLines={1} style={[styles.displayName, { color: theme.textSecondary }]}>
-            {post.author.displayName}
-          </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Ver perfil de ${name}`}
+        onPress={() => onOpenAuthor(post.author.id)}
+        style={({ pressed }) => [styles.header, pressed ? styles.pressed : undefined]}>
+        <View style={[styles.avatar, { backgroundColor: theme.backgroundSelected }]}>
+          <Text style={[styles.initial, { color: theme.text }]}>{initial}</Text>
         </View>
+        <View style={styles.authorText}>
+          <Text style={[styles.name, { color: theme.text }]}>{name}</Text>
+          {username ? (
+            <Text style={[styles.username, { color: theme.textSecondary }]}>@{username}</Text>
+          ) : null}
+        </View>
+      </Pressable>
+
+      <View style={[styles.media, { backgroundColor: theme.backgroundElement }]}>
+        <Text style={{ color: theme.textSecondary }}>Imagen</Text>
       </View>
 
-      <PostImage
-        accessibilityLabel={`Publicación de ${post.author.displayName}: ${post.caption}`}
-        imageUrl={post.imageUrl}
-      />
-
       <View style={styles.details}>
-        <View accessibilityLabel="Acciones de la publicación, próximamente disponibles" style={styles.actions}>
-          <SymbolView
-            name={{ ios: 'heart', android: 'favorite_border', web: 'favorite_border' }}
-            size={26}
-            tintColor={theme.text}
-          />
-          <SymbolView
-            name={{ ios: 'bubble.left', android: 'chat_bubble_outline', web: 'chat_bubble_outline' }}
-            size={24}
-            tintColor={theme.text}
-          />
-          <SymbolView
-            name={{ ios: 'paperplane', android: 'send', web: 'send' }}
-            size={24}
-            tintColor={theme.text}
-          />
-        </View>
-
-        <Text style={[styles.likes, { color: theme.text }]}>
-          {post.likeCount.toLocaleString('es-CO')} Me gusta
+        <Text
+          accessibilityLabel={`${post.likesCount} Me gusta. ${post.isLiked ? 'Te gusta esta publicación.' : 'No has indicado Me gusta.'}`}
+          style={[styles.likes, { color: theme.text }]}>
+          <Text style={post.isLiked ? styles.liked : undefined}>{post.isLiked ? '♥' : '♡'}</Text>
+          {' '}{post.likesCount.toLocaleString('es-CO')} Me gusta
         </Text>
-
-        <Text style={[styles.caption, { color: theme.text }]}>
-          <Text style={styles.captionUsername}>{post.author.username}</Text> {post.caption}
+        <Text style={[styles.body, { color: theme.textSecondary }]}>
+          {post.commentsCount.toLocaleString('es-CO')} comentarios
         </Text>
-
-        <Text style={[styles.comments, { color: theme.textSecondary }]}>
-          Ver los {post.commentCount.toLocaleString('es-CO')} comentarios
+        {post.caption !== '' ? (
+          <Text style={[styles.body, { color: theme.text }]}>
+            <Text style={styles.captionName}>{username || name}</Text> {post.caption}
+          </Text>
+        ) : null}
+        <Text style={[styles.date, { color: theme.textSecondary }]}>
+          {dateFormatter.format(new Date(post.createdAt))}
         </Text>
-        <Text style={[styles.date, { color: theme.textSecondary }]}>{publishedAt}</Text>
       </View>
     </View>
   );
 });
 
 const styles = StyleSheet.create({
-  card: {
-    width: '100%',
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  avatar: {
-    borderRadius: 20,
-    height: 40,
-    width: 40,
-  },
-  authorText: {
-    flex: 1,
-  },
-  username: {
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 19,
-  },
-  displayName: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  details: {
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  actions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 18,
-    height: 28,
-  },
-  likes: {
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
-  },
-  caption: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  captionUsername: {
-    fontWeight: '700',
-  },
-  comments: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  date: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
+  card: { width: '100%' },
+  header: { alignItems: 'center', flexDirection: 'row', gap: 12, padding: 16 },
+  avatar: { borderRadius: 20, height: 40, width: 40, alignItems: 'center', justifyContent: 'center' },
+  initial: { fontSize: 18, fontWeight: '700' },
+  authorText: { flex: 1, minWidth: 0 },
+  name: { fontSize: 14, fontWeight: '700', lineHeight: 20 },
+  username: { fontSize: 12, lineHeight: 18 },
+  media: { aspectRatio: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
+  details: { gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
+  likes: { fontSize: 16, fontWeight: '600', lineHeight: 24 },
+  liked: { color: '#D92545' },
+  body: { fontSize: 14, lineHeight: 20 },
+  captionName: { fontWeight: '700' },
+  date: { fontSize: 12, lineHeight: 18 },
+  pressed: { opacity: 0.7 },
 });

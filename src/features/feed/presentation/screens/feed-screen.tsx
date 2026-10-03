@@ -1,38 +1,47 @@
-import { useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useCallback } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  Platform,
-  StyleSheet,
-  Text,
-  View,
+  ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, Text, View,
   type ListRenderItem,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset } from '@/constants/theme';
-import { GetFeedPosts } from '@/features/feed/application/use-cases/get-feed-posts';
-import { MockPostRepository } from '@/features/feed/data/repositories/mock-post-repository';
-import type { Post } from '@/features/feed/domain/entities/post';
+import type { FeedPost } from '@/features/feed/domain/entities/feed-post';
+import type { FeedErrorCode } from '@/features/feed/domain/errors/feed-error';
 import { PostCard } from '@/features/feed/presentation/components/post-card';
+import { useFeed } from '@/features/feed/presentation/hooks/use-feed';
 import { useTheme } from '@/hooks/use-theme';
 
-type FeedState =
-  | { status: 'loading'; posts: Post[] }
-  | { status: 'success'; posts: Post[] }
-  | { status: 'error'; posts: Post[] };
+const messages: Record<FeedErrorCode, string> = {
+  'authentication-required': 'Tu sesión no está disponible.',
+  'invalid-request': 'No pudimos solicitar el feed.',
+  'invalid-response': 'No pudimos interpretar las publicaciones.',
+  unavailable: 'No pudimos cargar las publicaciones. Revisa tu conexión e inténtalo de nuevo.',
+};
+const getPostKey = (post: FeedPost) => post.id;
 
-const getFeedPosts = new GetFeedPosts(new MockPostRepository());
-
-const renderPost: ListRenderItem<Post> = ({ item }) => <PostCard post={item} />;
-const getPostKey = (post: Post) => post.id;
+function Feedback({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const theme = useTheme();
+  return (
+    <View accessibilityLiveRegion="polite" style={styles.feedback}>
+      <Text style={[styles.statusText, { color: theme.textSecondary }]}>{message}</Text>
+      {onRetry ? (
+        <Pressable accessibilityRole="button" onPress={onRetry}
+          style={({ pressed }) => [styles.retry, { backgroundColor: theme.backgroundElement },
+            pressed ? styles.pressed : undefined]}>
+          <Text style={[styles.retryText, { color: theme.text }]}>Reintentar</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 function FeedHeader() {
   const theme = useTheme();
-
   return (
     <View style={[styles.header, { borderBottomColor: theme.backgroundElement }]}>
-      <Text style={[styles.title, { color: theme.text }]}>Inicio</Text>
+      <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Inicio</Text>
       <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Momentos de tu comunidad</Text>
     </View>
   );
@@ -45,43 +54,27 @@ function PostSeparator() {
 
 export function FeedScreen() {
   const theme = useTheme();
-  const [state, setState] = useState<FeedState>({ status: 'loading', posts: [] });
+  const router = useRouter();
+  const { state, refresh, retryInitial, onEndReached, retryLoadMore } = useFeed();
+  const openAuthor = useCallback((profileId: string) => {
+    router.push({ pathname: '/home/profile/[profileId]', params: { profileId } });
+  }, [router]);
+  const renderPost: ListRenderItem<FeedPost> = useCallback(
+    ({ item }) => <PostCard post={item} onOpenAuthor={openAuthor} />, [openAuthor],
+  );
 
-  useEffect(() => {
-    let isMounted = true;
-
-    getFeedPosts
-      .execute()
-      .then((posts) => {
-        if (isMounted) {
-          setState({ status: 'success', posts });
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setState({ status: 'error', posts: [] });
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  if (state.status === 'loading') {
+  if (state.status === 'initial-loading') {
     return (
       <SafeAreaView style={[styles.centered, { backgroundColor: theme.background }]}>
-        <ActivityIndicator accessibilityLabel="Cargando publicaciones" color={theme.text} size="large" />
-        <Text style={[styles.statusText, { color: theme.textSecondary }]}>Cargando publicaciones…</Text>
+        <ActivityIndicator color={theme.text} size="large" />
+        <Feedback message="Cargando publicaciones..." />
       </SafeAreaView>
     );
   }
-
-  if (state.status === 'error') {
+  if (state.status === 'initial-error') {
     return (
       <SafeAreaView style={[styles.centered, { backgroundColor: theme.background }]}>
-        <Text style={[styles.errorTitle, { color: theme.text }]}>No pudimos cargar el feed</Text>
-        <Text style={[styles.statusText, { color: theme.textSecondary }]}>Vuelve a intentarlo más tarde.</Text>
+        <Feedback message={messages[state.error?.code ?? 'unavailable']} onRetry={retryInitial} />
       </SafeAreaView>
     );
   }
@@ -90,10 +83,38 @@ export function FeedScreen() {
     <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: theme.background }]}>
       <FlatList
         contentContainerStyle={styles.listContent}
-        data={state.posts}
+        data={state.page.posts}
         ItemSeparatorComponent={PostSeparator}
         keyExtractor={getPostKey}
-        ListHeaderComponent={FeedHeader}
+        ListHeaderComponent={
+          <>
+            <FeedHeader />
+            {state.refreshError ? (
+              <Feedback message={messages[state.refreshError.code]} onRetry={refresh} />
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          state.page.nextCursor === null
+            ? <Feedback message="Aún no hay publicaciones para mostrar." />
+            : null
+        }
+        ListFooterComponent={
+          state.operation === 'loading-more' ? (
+            <View style={styles.feedback}>
+              <ActivityIndicator color={theme.text} />
+              <Text style={[styles.statusText, { color: theme.textSecondary }]}>
+                Cargando más publicaciones...
+              </Text>
+            </View>
+          ) : state.loadMoreError ? (
+            <Feedback message="No pudimos cargar más publicaciones." onRetry={retryLoadMore} />
+          ) : null
+        }
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.5}
+        onRefresh={refresh}
+        refreshing={state.operation === 'refreshing'}
         renderItem={renderPost}
         showsVerticalScrollIndicator={false}
       />
@@ -102,51 +123,21 @@ export function FeedScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
+  screen: { flex: 1 },
   listContent: {
-    alignSelf: 'center',
-    paddingBottom: BottomTabInset + 24,
-    width: '100%',
-    maxWidth: 640,
+    alignSelf: 'center', paddingBottom: BottomTabInset + 24, width: '100%', maxWidth: 640,
   },
   header: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 2,
-    paddingBottom: 14,
-    paddingHorizontal: 16,
-    paddingTop: Platform.select({ web: 82, default: 10 }),
+    borderBottomWidth: StyleSheet.hairlineWidth, gap: 2, paddingBottom: 14,
+    paddingHorizontal: 16, paddingTop: Platform.select({ web: 82, default: 10 }),
   },
-  title: {
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: -0.6,
-    lineHeight: 32,
-  },
-  subtitle: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  separator: {
-    height: 8,
-  },
-  centered: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 12,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  statusText: {
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-  errorTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 24,
-    textAlign: 'center',
-  },
+  title: { fontSize: 26, fontWeight: '800', letterSpacing: -0.6, lineHeight: 32 },
+  subtitle: { fontSize: 13, lineHeight: 18 },
+  separator: { height: 8 },
+  centered: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: 24 },
+  feedback: { alignItems: 'center', gap: 12, padding: 20 },
+  statusText: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  retry: { borderRadius: 10, minHeight: 44, justifyContent: 'center', paddingHorizontal: 24 },
+  retryText: { fontSize: 16, fontWeight: '600' },
+  pressed: { opacity: 0.7 },
 });
