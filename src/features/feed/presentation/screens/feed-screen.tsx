@@ -95,6 +95,10 @@ export function FeedScreen() {
   const openAuthor = useCallback((profileId: string) => {
     router.push({ pathname: '/home/profile/[profileId]', params: { profileId } });
   }, [router]);
+  // Only the id travels: Comments loads its own authorized data.
+  const openComments = useCallback((postId: string) => {
+    router.push({ pathname: '/home/comments/[postId]', params: { postId } });
+  }, [router]);
   usePostMediaMemoryPressure();
   const [visiblePostIds, setVisiblePostIds] = useState(NO_VISIBLE_POSTS);
   // FlatList does not support changing this callback on the fly: keep one identity.
@@ -121,9 +125,12 @@ export function FeedScreen() {
         likeSaveFailed={failedPostIds.has(item.id)}
         onToggleLike={toggleLike}
         onOpenAuthor={openAuthor}
+        onOpenComments={openComments}
       />
     );
-  }, [openAuthor, visiblePostIds, getDisplayedLike, isLikeEnabled, failedPostIds, toggleLike]);
+  }, [
+    openAuthor, openComments, visiblePostIds, getDisplayedLike, isLikeEnabled, failedPostIds, toggleLike,
+  ]);
   const listExtraData = useMemo(
     () => ({ visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled }),
     [visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled],
