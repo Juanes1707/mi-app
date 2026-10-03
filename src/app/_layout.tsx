@@ -10,6 +10,7 @@ import {
 import { useAuth } from '@/features/auth/presentation/hooks/use-auth';
 import { AuthProvider } from '@/features/auth/presentation/providers/auth-provider';
 import { AuthEntryScreen } from '@/features/auth/presentation/screens/auth-entry-screen';
+import { OfflineSyncCoordinatorHost } from '@/features/offline-sync/presentation/offline-sync-coordinator-host';
 import { useTheme } from '@/hooks/use-theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -38,6 +39,7 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
   return (
     <AuthProvider {...authProviderDependencies}>
+      <OfflineSyncCoordinatorHost />
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AnimatedSplashOverlay />
         <AuthenticatedContent />

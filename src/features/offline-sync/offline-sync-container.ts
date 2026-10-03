@@ -1,7 +1,12 @@
+import NetInfo from '@react-native-community/netinfo';
 import { openDatabaseAsync } from 'expo-sqlite';
+import { AppState } from 'react-native';
 
 import { authProviderDependencies } from '@/features/auth/auth-container';
+import { OfflineSyncCoordinator } from '@/features/offline-sync/application/offline-sync-coordinator';
 import { OfflineMutationProcessor } from '@/features/offline-sync/application/offline-mutation-processor';
+import { OfflineSyncOrchestrator } from '@/features/offline-sync/application/offline-sync-orchestrator';
+import { OwnerReconciliationSignal } from '@/features/offline-sync/application/owner-reconciliation-signal';
 import {
   GetPendingPostLikeProjection, QueueSetPostLike,
 } from '@/features/offline-sync/application/post-like-use-cases';
@@ -20,14 +25,34 @@ export const offlineMutationQueue: OfflineMutationQueue = new SQLiteOfflineMutat
   async () => prepareOfflineMutationDatabase(await openDatabaseAsync(OFFLINE_MUTATIONS_DATABASE_NAME)),
 );
 
-// One shared processor; invoked explicitly through drainCurrentUser() (no timers yet).
-export const offlineMutationProcessor = new OfflineMutationProcessor(
+// One shared processor; only the orchestrator requests production drains.
+const offlineMutationProcessor = new OfflineMutationProcessor(
   offlineMutationQueue,
   {
     getCurrentUserId: async () =>
       (await authProviderDependencies.getCurrentAuthUser.execute())?.id ?? null,
   },
   new BackendPostLikeRemoteGateway(authenticatedBackendApiClient),
+);
+
+export const offlineSyncReconciliation = new OwnerReconciliationSignal();
+export const offlineSyncOrchestrator = new OfflineSyncOrchestrator(
+  offlineMutationProcessor,
+  offlineSyncReconciliation,
+);
+export const offlineSyncCoordinator = new OfflineSyncCoordinator(
+  {
+    fetch: () => NetInfo.fetch(),
+    subscribe: (listener) => NetInfo.addEventListener(listener),
+  },
+  {
+    getCurrentState: () => AppState.currentState,
+    subscribe: (listener) => {
+      const subscription = AppState.addEventListener('change', listener);
+      return () => subscription.remove();
+    },
+  },
+  offlineSyncOrchestrator,
 );
 
 export const queueSetPostLike = new QueueSetPostLike(offlineMutationQueue);

@@ -4,12 +4,14 @@ import type { FeedPost } from '@/features/feed/domain/entities/feed-post';
 import {
   mergeDesiredLikes, type EphemeralLikeIntent,
 } from '@/features/feed/presentation/optimistic-post-likes';
-import type { OfflineMutationDrainResult } from '@/features/offline-sync/application/offline-mutation-processor';
 import {
   projectPostLikeState, type PostLikeDisplayState,
 } from '@/features/offline-sync/domain/post-like-projection';
 import {
-  getPendingPostLikeProjection, offlineMutationProcessor, queueSetPostLike,
+  getPendingPostLikeProjection,
+  offlineSyncOrchestrator,
+  offlineSyncReconciliation,
+  queueSetPostLike,
 } from '@/features/offline-sync/offline-sync-container';
 
 // Whether the owner's durable pending state is known. Likes are accepted only when
@@ -31,6 +33,7 @@ type LikesState = {
 
 const NO_DESIRED: ReadonlyMap<string, boolean> = new Map();
 const NO_FAILURES: ReadonlySet<string> = new Set();
+const reconciledVersions = new Map<string, number>();
 
 function initialStateFor(owner: string | null): LikesState {
   return {
@@ -67,10 +70,9 @@ export function useOptimisticPostLikes(
   const ownerRef = useRef(ownerUserId);
   // Bumped on owner change and unmount: late callbacks of older work are ignored.
   const generationRef = useRef(0);
+  const projectionRequestRef = useRef(0);
   const mountedRef = useRef(false);
   const nextLocalIdRef = useRef(0);
-  const observedDrainRef = useRef<Promise<OfflineMutationDrainResult> | null>(null);
-  const drainJoinedRef = useRef(false);
   const refreshFeedRef = useRef(refreshFeed);
 
   useEffect(() => {
@@ -88,12 +90,13 @@ export function useOptimisticPostLikes(
   // is unknown, so likes stay disabled; a failure (including corrupt-data or an
   // unsupported database version) shows no pending state and deletes nothing.
   const bootstrapProjection = useCallback(async (owner: string, generation: number) => {
+    const request = ++projectionRequestRef.current;
     try {
       const durable = await getPendingPostLikeProjection.execute(owner);
-      if (generation !== generationRef.current) return;
+      if (generation !== generationRef.current || request !== projectionRequestRef.current) return;
       commit((current) => ({ ...current, durable, status: 'ready' }));
     } catch {
-      if (generation !== generationRef.current) return;
+      if (generation !== generationRef.current || request !== projectionRequestRef.current) return;
       commit((current) => ({ ...current, durable: NO_DESIRED, status: 'error' }));
     }
   }, [commit]);
@@ -101,55 +104,26 @@ export function useOptimisticPostLikes(
   // Reload after a sync. A trustworthy projection already exists, so likes stay enabled
   // and the previous overlay is kept until the new one replaces it (or if reading fails).
   const reloadProjection = useCallback(async (owner: string, generation: number) => {
+    const request = ++projectionRequestRef.current;
     try {
       const durable = await getPendingPostLikeProjection.execute(owner);
-      if (generation !== generationRef.current) return;
-      commit((current) => ({ ...current, durable }));
+      if (generation !== generationRef.current || request !== projectionRequestRef.current) {
+        return false;
+      }
+      commit((current) => ({ ...current, durable, status: 'ready' }));
+      return true;
     } catch {
       // Keep the current overlay: dropping it could show a state the user did not choose.
+      if (
+        generation === generationRef.current &&
+        request === projectionRequestRef.current &&
+        stateRef.current.status !== 'ready'
+      ) {
+        commit((current) => ({ ...current, status: 'error' }));
+      }
+      return false;
     }
   }, [commit]);
-
-  // One processor invocation per durable event. The processor shares an active run, so
-  // only the first caller observes it: one reconciliation per run, never a refresh storm.
-  const requestDrain = useCallback(() => {
-    const owner = ownerRef.current;
-    if (owner === null) return;
-    const drain = offlineMutationProcessor.drainCurrentUser();
-    if (drain === observedDrainRef.current) {
-      drainJoinedRef.current = true;
-      return;
-    }
-    observedDrainRef.current = drain;
-    drainJoinedRef.current = false;
-    const generation = generationRef.current;
-
-    void drain.then(async (result) => {
-      if (observedDrainRef.current !== drain) return;
-      observedDrainRef.current = null;
-      const joined = drainJoinedRef.current;
-      drainJoinedRef.current = false;
-      if (!mountedRef.current || generation !== generationRef.current) return;
-
-      if (result.processedCount > 0) {
-        // 1) authoritative read model first, 2) then the remaining pending rows. Until
-        // both are in, the old overlay stays; over fresh data an already-applied desired
-        // state has delta 0, so nothing snaps back.
-        const refreshed = await refreshFeedRef.current();
-        if (refreshed && mountedRef.current && generation === generationRef.current) {
-          await reloadProjection(owner, generation);
-        }
-      }
-      // A durable event that joined this run near its end may have missed its last
-      // peek; a completed run is asked once more (no retry after a blocked run).
-      if (joined && result.kind === 'drained' && mountedRef.current &&
-        generation === generationRef.current) {
-        requestDrain();
-      }
-    }, () => {
-      if (observedDrainRef.current === drain) observedDrainRef.current = null;
-    });
-  }, [reloadProjection]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -164,12 +138,60 @@ export function useOptimisticPostLikes(
   useEffect(() => {
     generationRef.current += 1;
     const generation = generationRef.current;
+    projectionRequestRef.current += 1;
     ownerRef.current = ownerUserId;
-    observedDrainRef.current = null;
-    drainJoinedRef.current = false;
     commit(() => initialStateFor(ownerUserId));
     if (ownerUserId !== null) void bootstrapProjection(ownerUserId, generation);
   }, [ownerUserId, commit, bootstrapProjection]);
+
+  // Reconcile server first and then SQLite for this exact owner. Subscribing before
+  // reading the retained version closes the mount race: a completion between both
+  // operations is still observed. Calls are serialized with one trailing version.
+  useEffect(() => {
+    if (ownerUserId === null) return;
+    const owner = ownerUserId;
+    const generation = generationRef.current;
+    let observedVersion = reconciledVersions.get(owner) ?? 0;
+    let pendingVersion = observedVersion;
+    let reconciling = false;
+    let disposed = false;
+
+    const reconcile = async () => {
+      if (reconciling || disposed) return;
+      reconciling = true;
+      try {
+        while (!disposed && pendingVersion > observedVersion) {
+          const targetVersion = pendingVersion;
+          const refreshed = await refreshFeedRef.current();
+          if (disposed || generation !== generationRef.current) return;
+          if (refreshed) {
+            const projectionReloaded = await reloadProjection(owner, generation);
+            if (disposed || generation !== generationRef.current) return;
+            if (projectionReloaded) reconciledVersions.set(owner, targetVersion);
+          }
+          // A failed refresh is retained globally for a future mount but does not
+          // create an immediate retry loop in this one.
+          observedVersion = targetVersion;
+        }
+      } finally {
+        reconciling = false;
+        if (!disposed && pendingVersion > observedVersion) void reconcile();
+      }
+    };
+
+    const observe = (version: number) => {
+      if (version <= pendingVersion) return;
+      pendingVersion = version;
+      void reconcile();
+    };
+
+    const unsubscribe = offlineSyncReconciliation.subscribe(owner, observe);
+    observe(offlineSyncReconciliation.getVersion(owner));
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [ownerUserId, reloadProjection]);
 
   const retryPendingLikesLoad = useCallback(() => {
     const owner = ownerRef.current;
@@ -177,7 +199,6 @@ export function useOptimisticPostLikes(
     if (owner === null || !mountedRef.current || current.owner !== owner || current.status !== 'error') {
       return;
     }
-    generationRef.current += 1;
     const generation = generationRef.current;
     commit((latest) => ({ ...latest, status: 'loading' }));
     void bootstrapProjection(owner, generation);
@@ -212,14 +233,16 @@ export function useOptimisticPostLikes(
     // the Feed unmounts. Only the React updates below are guarded.
     queueSetPostLike.execute({ ownerUserId: owner, postId: post.id, liked: intent.desiredLiked }).then(
       () => {
-        if (!mountedRef.current || generation !== generationRef.current) return;
-        // Durable now: same desired state, different layer, so nothing moves on screen.
-        commit((latest) => ({
-          ...latest,
-          durable: withDesired(latest.durable, post.id, intent.desiredLiked),
-          ephemeral: latest.ephemeral.filter((item) => item.localId !== intent.localId),
-        }));
-        requestDrain();
+        if (mountedRef.current && generation === generationRef.current) {
+          // Durable now: same desired state, different layer, so nothing moves on screen.
+          commit((latest) => ({
+            ...latest,
+            durable: withDesired(latest.durable, post.id, intent.desiredLiked),
+            ephemeral: latest.ephemeral.filter((item) => item.localId !== intent.localId),
+          }));
+        }
+        // The durable event is global even if the Feed unmounted meanwhile.
+        void offlineSyncOrchestrator.requestDrain('enqueue');
       },
       () => {
         if (!mountedRef.current || generation !== generationRef.current) return;
@@ -237,7 +260,7 @@ export function useOptimisticPostLikes(
         });
       },
     );
-  }, [commit, requestDrain]);
+  }, [commit]);
 
   // The previous owner's state is never rendered, not even for the frame before the
   // owner-change effect runs: a new owner starts as loading, without any overlay.

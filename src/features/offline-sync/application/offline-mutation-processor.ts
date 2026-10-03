@@ -19,12 +19,18 @@ export type DrainBlockReason =
   | 'queue-inconsistent';
 
 export type OfflineMutationDrainResult =
-  | { kind: 'drained'; processedCount: number }
-  | { kind: 'not-authenticated'; processedCount: number }
+  | { kind: 'drained'; ownerUserId: string; processedCount: number }
+  | { kind: 'not-authenticated'; ownerUserId: string | null; processedCount: number }
   // The session now belongs to another user: the previous owner's queue is left as is.
-  | { kind: 'session-changed'; processedCount: number }
+  | { kind: 'session-changed'; ownerUserId: string; processedCount: number }
   // `sequence` is null when the blocking entry could not be identified (e.g. unreadable row).
-  | { kind: 'blocked'; processedCount: number; sequence: number | null; reason: DrainBlockReason };
+  | {
+      kind: 'blocked';
+      ownerUserId: string | null;
+      processedCount: number;
+      sequence: number | null;
+      reason: DrainBlockReason;
+    };
 
 type CurrentUserRead =
   | { kind: 'user'; id: string }
@@ -34,11 +40,12 @@ type CurrentUserRead =
 type SendOutcome = 'terminal' | 'signed-out' | DrainBlockReason;
 
 function blocked(
+  ownerUserId: string | null,
   processedCount: number,
   sequence: number | null,
   reason: DrainBlockReason,
 ): OfflineMutationDrainResult {
-  return { kind: 'blocked', processedCount, sequence, reason };
+  return { kind: 'blocked', ownerUserId, processedCount, sequence, reason };
 }
 
 function queueFailureReason(error: unknown): DrainBlockReason {
@@ -75,8 +82,10 @@ export class OfflineMutationProcessor {
 
   private async drain(): Promise<OfflineMutationDrainResult> {
     const start = await this.readCurrentUser();
-    if (start.kind === 'unavailable') return blocked(0, null, 'unavailable');
-    if (start.kind === 'signed-out') return { kind: 'not-authenticated', processedCount: 0 };
+    if (start.kind === 'unavailable') return blocked(null, 0, null, 'unavailable');
+    if (start.kind === 'signed-out') {
+      return { kind: 'not-authenticated', ownerUserId: null, processedCount: 0 };
+    }
     const owner = start.id;
     let processedCount = 0;
 
@@ -84,9 +93,15 @@ export class OfflineMutationProcessor {
       // Before every new entry: the session must still belong to the queue's owner.
       if (processedCount > 0) {
         const current = await this.readCurrentUser();
-        if (current.kind === 'unavailable') return blocked(processedCount, null, 'unavailable');
-        if (current.kind === 'signed-out') return { kind: 'not-authenticated', processedCount };
-        if (current.id !== owner) return { kind: 'session-changed', processedCount };
+        if (current.kind === 'unavailable') {
+          return blocked(owner, processedCount, null, 'unavailable');
+        }
+        if (current.kind === 'signed-out') {
+          return { kind: 'not-authenticated', ownerUserId: owner, processedCount };
+        }
+        if (current.id !== owner) {
+          return { kind: 'session-changed', ownerUserId: owner, processedCount };
+        }
       }
 
       // Always peek again (never a snapshot), so entries enqueued meanwhile are found.
@@ -94,13 +109,17 @@ export class OfflineMutationProcessor {
       try {
         mutation = await this.queue.peekOldest(owner);
       } catch (error: unknown) {
-        return blocked(processedCount, null, queueFailureReason(error));
+        return blocked(owner, processedCount, null, queueFailureReason(error));
       }
-      if (mutation === null) return { kind: 'drained', processedCount };
+      if (mutation === null) return { kind: 'drained', ownerUserId: owner, processedCount };
 
       const outcome = await this.sendSetPostLike(owner, mutation);
-      if (outcome === 'signed-out') return { kind: 'not-authenticated', processedCount };
-      if (outcome !== 'terminal') return blocked(processedCount, mutation.sequence, outcome);
+      if (outcome === 'signed-out') {
+        return { kind: 'not-authenticated', ownerUserId: owner, processedCount };
+      }
+      if (outcome !== 'terminal') {
+        return blocked(owner, processedCount, mutation.sequence, outcome);
+      }
 
       // Removed only after a terminal remote outcome. If the app dies before this line,
       // the entry is replayed later, which is safe because PUT /post-likes is idempotent.
@@ -108,9 +127,11 @@ export class OfflineMutationProcessor {
       try {
         removed = await this.queue.remove(owner, mutation.sequence);
       } catch {
-        return blocked(processedCount, mutation.sequence, 'unavailable');
+        return blocked(owner, processedCount, mutation.sequence, 'unavailable');
       }
-      if (!removed) return blocked(processedCount, mutation.sequence, 'queue-inconsistent');
+      if (!removed) {
+        return blocked(owner, processedCount, mutation.sequence, 'queue-inconsistent');
+      }
       processedCount += 1;
     }
   }
