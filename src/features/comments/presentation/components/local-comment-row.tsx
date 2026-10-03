@@ -27,6 +27,7 @@ type LocalCommentRowProps = {
   depth: number;
   isExpanded: boolean;
   localRepliesCount: number;
+  realtimeRepliesCount?: number;
   isOrphan: boolean;
   // Composer ready; replying also requires this comment to be durable.
   canInteract: boolean;
@@ -41,7 +42,7 @@ type LocalCommentRowProps = {
 // signed-in user ("Tú"): no profile lookup per row and no username guessed from the
 // session.
 export const LocalCommentRow = memo(function LocalCommentRow({
-  local, depth, isExpanded, localRepliesCount, isOrphan, canInteract,
+  local, depth, isExpanded, localRepliesCount, realtimeRepliesCount = 0, isOrphan, canInteract,
   onExpandReplies, onCollapseReplies, onReply, onRetry, onDiscard,
 }: LocalCommentRowProps) {
   const theme = useTheme();
@@ -78,7 +79,7 @@ export const LocalCommentRow = memo(function LocalCommentRow({
           onPress={() => onReply(local.commentId, OWN_REPLY_LABEL)}
         />
       )}
-      {localRepliesCount > 0 ? (
+      {localRepliesCount + realtimeRepliesCount > 0 ? (
         <CommentAction
           label={isExpanded ? 'Ocultar respuestas' : 'Ver respuestas'}
           expanded={isExpanded}

@@ -5,6 +5,7 @@ import {
   markLocalSaving, mergePendingProjection, pruneCanonicalResolved, type CommentOverlay, type CommentResolution,
   type LocalComment,
 } from '@/features/comments/presentation/comment-overlay';
+import type { PostComment } from '@/features/comments/domain/post-comment';
 import { ROOT_BRANCH, type CommentTree } from '@/features/comments/presentation/comment-tree';
 import {
   countCodePoints, isValidPostCommentBody, MAX_POST_COMMENT_BODY_CODE_POINTS,
@@ -43,6 +44,8 @@ type Options = {
   postId: string;
   // The server tree on screen: used to recognise canonical rows, never modified here.
   tree: CommentTree;
+  // Canonical comments that arrived live (re-read over HTTP) but are not paginated yet.
+  liveComments?: ReadonlyMap<string, PostComment>;
   // Some of the user's comments left the sync queue; their branches may show them now.
   onCommentsSynced: (postId: string, branchKeys: string[]) => void;
   onReplyCreated: (parentCommentId: string) => void;
@@ -53,7 +56,7 @@ type Options = {
 // where a new comment is shown on tap, persisted in SQLite, and synced only through
 // the global queue → orchestrator → FIFO processor. Presentation never sends HTTP.
 export function useOptimisticPostComments({
-  ownerUserId, postId, tree, onCommentsSynced, onReplyCreated,
+  ownerUserId, postId, tree, liveComments, onCommentsSynced, onReplyCreated,
 }: Options) {
   const [state, setState] = useState<OverlayState>(() => initialStateFor(ownerUserId, postId));
   const [draft, setDraftState] = useState('');
@@ -68,7 +71,12 @@ export function useOptimisticPostComments({
   const projectionRequestRef = useRef(0);
   const nextLocalOrderRef = useRef(0);
   const runnerRef = useRef({ generation: -1, running: false, trailing: false });
-  const treeRef = useRef(tree);
+  // Every canonical row on screen (paginated + live): what a local intention can match.
+  const canonicalNodes = useMemo(
+    () => (liveComments === undefined || liveComments.size === 0 ? tree.nodes : new Map([...tree.nodes, ...liveComments])),
+    [tree.nodes, liveComments],
+  );
+  const canonicalRef = useRef(canonicalNodes);
   const callbacksRef = useRef({ onCommentsSynced, onReplyCreated });
 
   useEffect(() => {
@@ -113,7 +121,7 @@ export function useOptimisticPostComments({
   // Comments CONFIRMED just now may be revealed by their fully loaded branch.
   const catchUpSent = useCallback((sent: readonly LocalComment[]) => {
     const { owner, postId: target } = stateRef.current;
-    const nodes = treeRef.current.nodes;
+    const nodes = canonicalRef.current;
     const branchKeys = sent
       .filter((entry) => !isCanonicalMatch(entry, nodes.get(entry.commentId), owner))
       .map((entry) => entry.parentCommentId ?? ROOT_BRANCH);
@@ -127,7 +135,7 @@ export function useOptimisticPostComments({
         current.entries, pending, requestId, () => ++nextLocalOrderRef.current, resolveComment,
       );
       sent = merged.sent;
-      const entries = pruneCanonicalResolved(merged.entries, treeRef.current.nodes, current.owner);
+      const entries = pruneCanonicalResolved(merged.entries, canonicalRef.current, current.owner);
       if (entries === current.entries && current.status === 'ready') return current;
       return { ...current, status: 'ready', entries };
     });
@@ -218,12 +226,13 @@ export function useOptimisticPostComments({
     });
   }, [ownerUserId, postId, catchUpSent, commitEntries, resolveComment]);
 
-  // A server page now contains a comment that left the queue: the canonical row
-  // replaces it (also a terminal one: a lost 201 followed by a 404 replay).
+  // A canonical row (a server page, or a live comment re-read over HTTP) now contains a
+  // comment that left the queue: it replaces the local copy (also a terminal one: a
+  // lost 201 followed by a 404 replay). A pending copy is only hidden (flatten).
   useEffect(() => {
-    treeRef.current = tree;
-    commitEntries((entries) => pruneCanonicalResolved(entries, tree.nodes, stateRef.current.owner));
-  }, [tree, commitEntries]);
+    canonicalRef.current = canonicalNodes;
+    commitEntries((entries) => pruneCanonicalResolved(entries, canonicalNodes, stateRef.current.owner));
+  }, [canonicalNodes, commitEntries]);
 
   const retryPendingLoad = useCallback(() => {
     const current = stateRef.current;

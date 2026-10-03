@@ -26,6 +26,33 @@ export class AuthenticatedUserMismatchError extends Error {
   }
 }
 
+// The session token is read ONCE, its subject is checked against `expectedUserId`, and
+// that very same token is returned for the caller to use. There is no second token
+// lookup in which a different session could slip in. Shared by every owner-bound
+// transport (HTTP below, and the Realtime join of the comments feature).
+export async function requireAccessTokenOf(
+  accessTokenProvider: AccessTokenProvider,
+  expectedUserId: string,
+): Promise<string> {
+  const accessToken = await accessTokenProvider.getAccessToken();
+
+  if (!accessToken) {
+    throw new AuthenticationRequiredError();
+  }
+
+  const subject = readUnverifiedJwtSubject(accessToken);
+
+  if (subject === null) {
+    throw new AuthenticationRequiredError();
+  }
+
+  if (subject !== expectedUserId.toLowerCase()) {
+    throw new AuthenticatedUserMismatchError();
+  }
+
+  return accessToken;
+}
+
 export class AuthenticatedBackendApiClient {
   constructor(
     private readonly backendApiClient: BackendApiClient,
@@ -70,6 +97,20 @@ export class AuthenticatedBackendApiClient {
     });
   }
 
+  // GET bound to an expected user (see requireAccessTokenFor).
+  async getAsUser<TResponse>(
+    expectedUserId: string,
+    path: string,
+    options?: AuthenticatedBackendRequestOptions,
+  ): Promise<TResponse> {
+    const accessToken = await this.requireAccessTokenFor(expectedUserId);
+
+    return this.backendApiClient.get<TResponse>(path, {
+      ...options,
+      accessToken,
+    });
+  }
+
   // PUT bound to an expected user (see requireAccessTokenFor).
   async putAsUser<TResponse, TBody>(
     expectedUserId: string,
@@ -100,23 +141,10 @@ export class AuthenticatedBackendApiClient {
     });
   }
 
-  // The token is read ONCE, its subject is checked against `expectedUserId`, and the
-  // caller sends that very same token. There is no second token lookup in which a
-  // different session could slip in. The expected user is never sent: the backend
-  // still derives the actor from the verified JWT.
-  private async requireAccessTokenFor(expectedUserId: string): Promise<string> {
-    const accessToken = await this.requireAccessToken();
-    const subject = readUnverifiedJwtSubject(accessToken);
-
-    if (subject === null) {
-      throw new AuthenticationRequiredError();
-    }
-
-    if (subject !== expectedUserId.toLowerCase()) {
-      throw new AuthenticatedUserMismatchError();
-    }
-
-    return accessToken;
+  // See requireAccessTokenOf. The expected user is never sent: the backend still
+  // derives the actor from the verified JWT.
+  private requireAccessTokenFor(expectedUserId: string): Promise<string> {
+    return requireAccessTokenOf(this.accessTokenProvider, expectedUserId);
   }
 
   private async requireAccessToken(): Promise<string> {

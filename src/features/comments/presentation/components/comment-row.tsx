@@ -31,12 +31,14 @@ export function repliesLabel(count: number): string {
   return count === 1 ? 'Ver 1 respuesta' : `Ver ${count.toLocaleString('es-CO')} respuestas`;
 }
 
-// Collapsed label. Local replies are an extra hint, never added to the server count:
-// a pending reply may already be counted by the server after a crash and replay.
-export function collapsedRepliesLabel(serverCount: number, localCount: number): string {
+// Collapsed label. Local and live replies are extra hints, never added to the server
+// count: a pending reply may already be counted by the server after a crash and replay,
+// and a live reply may already be part of the count read earlier.
+export function collapsedRepliesLabel(serverCount: number, localCount: number, realtimeCount = 0): string {
   if (serverCount === 0) return 'Ver respuestas';
-  if (localCount === 0) return repliesLabel(serverCount);
-  return `${repliesLabel(serverCount)} · +${localCount} ${localCount === 1 ? 'tuya' : 'tuyas'}`;
+  const local = localCount === 0 ? '' : ` · +${localCount} ${localCount === 1 ? 'tuya' : 'tuyas'}`;
+  const live = realtimeCount === 0 ? '' : ' · nuevas';
+  return `${repliesLabel(serverCount)}${local}${live}`;
 }
 
 export function CommentAction({
@@ -112,6 +114,8 @@ type CommentRowProps = {
   isExpanded: boolean;
   // The user's own replies to this comment that no server page contains yet.
   localRepliesCount: number;
+  // Live replies (re-read over HTTP) that no loaded page contains yet.
+  realtimeRepliesCount?: number;
   // False until the user's pending comments are known (see useOptimisticPostComments).
   canReply: boolean;
   onExpandReplies: (commentId: string, hasLocalReplies: boolean) => void;
@@ -120,7 +124,8 @@ type CommentRowProps = {
 };
 
 export const CommentRow = memo(function CommentRow({
-  comment, depth, isExpanded, localRepliesCount, canReply, onExpandReplies, onCollapseReplies, onReply,
+  comment, depth, isExpanded, localRepliesCount, realtimeRepliesCount = 0, canReply, onExpandReplies,
+  onCollapseReplies, onReply,
 }: CommentRowProps) {
   const theme = useTheme();
   const { username } = comment.author;
@@ -129,7 +134,8 @@ export const CommentRow = memo(function CommentRow({
   const handle = displayName !== null && username !== null ? `@${username}` : null;
   const initial = (Array.from(displayName?.trim() || username || '?')[0] ?? '?').toUpperCase();
   const replyLabel = username !== null ? `@${username}` : displayName ?? 'un comentario';
-  const hasReplies = comment.directRepliesCount > 0 || localRepliesCount > 0;
+  const overlayReplies = localRepliesCount + realtimeRepliesCount;
+  const hasReplies = comment.directRepliesCount > 0 || overlayReplies > 0;
 
   return (
     <CommentFrame
@@ -153,11 +159,11 @@ export const CommentRow = memo(function CommentRow({
         <CommentAction
           label={isExpanded
             ? 'Ocultar respuestas'
-            : collapsedRepliesLabel(comment.directRepliesCount, localRepliesCount)}
+            : collapsedRepliesLabel(comment.directRepliesCount, localRepliesCount, realtimeRepliesCount)}
           expanded={isExpanded}
           onPress={() => (isExpanded
             ? onCollapseReplies(comment.id)
-            : onExpandReplies(comment.id, localRepliesCount > 0))}
+            : onExpandReplies(comment.id, overlayReplies > 0))}
         />
       ) : null}
     </CommentFrame>

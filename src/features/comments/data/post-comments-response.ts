@@ -73,7 +73,24 @@ export function parsePostCommentsPage(
   return { comments, nextCursor };
 }
 
-function parseComment(value: unknown, expected: ExpectedPostCommentsPage): PostComment | null {
+// Validates a 200 body of GET /post-comment: exactly { comment }, the same comment DTO
+// as a page row, and it must be the requested comment of the requested post (its
+// parent can be any: null for a root, a UUID for a reply).
+export function parseSinglePostComment(
+  value: unknown,
+  expected: { postId: string; commentId: string },
+): PostComment | null {
+  if (!hasExactFields(value, ['comment'])) return null;
+  const comment = parseComment(value.comment, { postId: expected.postId, parentCommentId: undefined });
+  return comment !== null && isSameUuid(comment.id, expected.commentId) ? comment : null;
+}
+
+// `parentCommentId: undefined` accepts any parent (targeted read); otherwise the row
+// must belong exactly to that sibling set (page read).
+function parseComment(
+  value: unknown,
+  expected: { postId: string; parentCommentId: string | null | undefined },
+): PostComment | null {
   if (!hasExactFields(value, COMMENT_FIELDS)) return null;
   const { id, postId, parentCommentId, author, body, createdAt, directRepliesCount } = value;
   if (!hasExactFields(author, AUTHOR_FIELDS)) return null;
@@ -109,8 +126,9 @@ function parseComment(value: unknown, expected: ExpectedPostCommentsPage): PostC
 
 function matchesExpectedParent(
   value: unknown,
-  expected: string | null,
+  expected: string | null | undefined,
 ): value is string | null {
+  if (expected === undefined) return value === null || isUuid(value);
   if (expected === null) return value === null;
   return isUuid(value) && isSameUuid(value, expected);
 }

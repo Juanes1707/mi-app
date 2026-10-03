@@ -36,3 +36,6 @@ verify_jwt = true
 
 [functions.post-comments]
 verify_jwt = true
+
+[functions.post-comment]
+verify_jwt = true

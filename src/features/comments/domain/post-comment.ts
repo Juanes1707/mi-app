@@ -31,6 +31,13 @@ export type PostCommentsPage = {
 
 // One sibling set: the roots of a post (parentCommentId null) or the direct
 // replies of one comment. Deeper levels are separate requests.
+// One comment, read for (and only with the session of) the expected owner.
+export type PostCommentRequest = {
+  expectedOwnerUserId: string;
+  postId: string;
+  commentId: string;
+};
+
 export type PostCommentsPageRequest = {
   postId: string;
   parentCommentId: string | null;

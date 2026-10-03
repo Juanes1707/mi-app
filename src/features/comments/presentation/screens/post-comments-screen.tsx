@@ -15,6 +15,7 @@ import { CommentRow } from '@/features/comments/presentation/components/comment-
 import { LocalCommentRow } from '@/features/comments/presentation/components/local-comment-row';
 import { useOptimisticPostComments } from '@/features/comments/presentation/hooks/use-optimistic-post-comments';
 import { usePostComments } from '@/features/comments/presentation/hooks/use-post-comments';
+import { useRealtimePostComments } from '@/features/comments/presentation/hooks/use-realtime-post-comments';
 import { normalizeUuid } from '@/features/offline-sync/domain/uuid';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -22,7 +23,9 @@ const ROOT_ERROR_MESSAGES: Record<PostCommentsErrorCode, string> = {
   'post-not-found': 'Esta publicación ya no está disponible.',
   'profile-not-ready': 'Tu perfil todavía no está listo.',
   'authentication-required': 'Tu sesión no está disponible.',
+  'owner-session-mismatch': 'Tu sesión no está disponible.',
   'parent-not-found': 'No pudimos cargar los comentarios.',
+  'comment-not-found': 'No pudimos cargar los comentarios.',
   'invalid-request': 'No pudimos cargar los comentarios.',
   'invalid-response': 'No pudimos cargar los comentarios.',
   unavailable: 'No pudimos cargar los comentarios.',
@@ -30,6 +33,7 @@ const ROOT_ERROR_MESSAGES: Record<PostCommentsErrorCode, string> = {
 const REFRESH_ERROR_MESSAGES: Record<PostCommentsErrorCode, string> = {
   ...ROOT_ERROR_MESSAGES,
   'parent-not-found': 'No pudimos actualizar los comentarios.',
+  'comment-not-found': 'No pudimos actualizar los comentarios.',
   'invalid-request': 'No pudimos actualizar los comentarios.',
   'invalid-response': 'No pudimos actualizar los comentarios.',
   unavailable: 'No pudimos actualizar los comentarios.',
@@ -57,7 +61,10 @@ function PostComments({ postId }: { postId: string }) {
   const {
     tree, root, isRefreshing, refreshError,
     expandReplies, collapseReplies, continueReplies, loadMoreRoots, retryRoots, refresh, catchUpBranches,
+    markPostUnavailable,
   } = usePostComments(postId);
+  // Live hints → authorized GET → canonical comments kept outside the paginated tree.
+  const realtime = useRealtimePostComments({ ownerUserId, postId, tree, onPostUnavailable: markPostUnavailable });
   const onReplyCreated = useCallback(
     (parentCommentId: string) => expandReplies(parentCommentId, { localChildren: true }),
     [expandReplies],
@@ -65,13 +72,16 @@ function PostComments({ postId }: { postId: string }) {
   // Server browsing and the local projection load independently: comments can be
   // read (and the overlay shown) even while the other side is loading or failed.
   const local = useOptimisticPostComments({
-    ownerUserId, postId, tree, onCommentsSynced: catchUpBranches, onReplyCreated,
+    ownerUserId, postId, tree, liveComments: realtime.comments, onCommentsSynced: catchUpBranches, onReplyCreated,
   });
   const { startReply, retryLocal, discardLocal } = local;
   const canInteract = local.status === 'ready';
 
-  // Server tree + local overlay → one flat list of rows for one FlatList.
-  const rows = useMemo(() => flattenVisibleRows(tree, local.overlay), [tree, local.overlay]);
+  // Paginated tree + live overlay + local overlay → one flat list for one FlatList.
+  const rows = useMemo(
+    () => flattenVisibleRows(tree, local.overlay, realtime.comments),
+    [tree, local.overlay, realtime.comments],
+  );
 
   const expand = useCallback(
     (commentId: string, hasLocalReplies: boolean) => expandReplies(commentId, { localChildren: hasLocalReplies }),
@@ -95,6 +105,7 @@ function PostComments({ postId }: { postId: string }) {
             depth={item.depth}
             isExpanded={item.isExpanded}
             localRepliesCount={item.localRepliesCount}
+            realtimeRepliesCount={item.realtimeRepliesCount}
             canReply={canInteract}
             onExpandReplies={expand}
             onCollapseReplies={collapseReplies}
@@ -108,6 +119,7 @@ function PostComments({ postId }: { postId: string }) {
             depth={item.depth}
             isExpanded={item.isExpanded}
             localRepliesCount={item.localRepliesCount}
+            realtimeRepliesCount={item.realtimeRepliesCount}
             isOrphan={item.isOrphan}
             canInteract={canInteract}
             onExpandReplies={expand}

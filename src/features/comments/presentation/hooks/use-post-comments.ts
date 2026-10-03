@@ -142,6 +142,13 @@ export function usePostComments(postId: string) {
     }
   }, [launch, publish]);
 
+  // Another authorized read (e.g. the targeted read behind a Realtime hint) learned that
+  // this post is gone or no longer visible to the user: same outcome as a page 404.
+  const markPostUnavailable = useCallback((targetPostId: string) => {
+    if (!mountedRef.current || stateRef.current.tree.postId !== targetPostId) return;
+    showPostUnavailable(targetPostId);
+  }, [showPostUnavailable]);
+
   // Called when some of the user's comments of this post left the sync queue: each
   // fully loaded branch they belong to checks its tail (see startCatchUp).
   const catchUpBranches = useCallback((targetPostId: string, branchKeys: readonly string[]) => {
@@ -244,5 +251,6 @@ export function usePostComments(postId: string) {
     retryRoots,
     refresh,
     catchUpBranches,
+    markPostUnavailable,
   };
 }
