@@ -10,6 +10,7 @@ import { OwnerReconciliationSignal } from '@/features/offline-sync/application/o
 import {
   GetPendingPostLikeProjection, QueueSetPostLike,
 } from '@/features/offline-sync/application/post-like-use-cases';
+import { BackendPostCommentRemoteGateway } from '@/features/offline-sync/data/backend-post-comment-remote-gateway';
 import { BackendPostLikeRemoteGateway } from '@/features/offline-sync/data/backend-post-like-remote-gateway';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
 import {
@@ -25,7 +26,8 @@ export const offlineMutationQueue: OfflineMutationQueue = new SQLiteOfflineMutat
   async () => prepareOfflineMutationDatabase(await openDatabaseAsync(OFFLINE_MUTATIONS_DATABASE_NAME)),
 );
 
-// One shared processor; only the orchestrator requests production drains.
+// One shared processor for every kind (likes and comments, one global FIFO); only
+// the orchestrator requests production drains.
 const offlineMutationProcessor = new OfflineMutationProcessor(
   offlineMutationQueue,
   {
@@ -33,6 +35,7 @@ const offlineMutationProcessor = new OfflineMutationProcessor(
       (await authProviderDependencies.getCurrentAuthUser.execute())?.id ?? null,
   },
   new BackendPostLikeRemoteGateway(authenticatedBackendApiClient),
+  new BackendPostCommentRemoteGateway(authenticatedBackendApiClient),
 );
 
 export const offlineSyncReconciliation = new OwnerReconciliationSignal();

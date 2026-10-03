@@ -70,16 +70,41 @@ export class AuthenticatedBackendApiClient {
     });
   }
 
-  // PUT bound to an expected user: the token is read ONCE, its subject is checked
-  // against `expectedUserId`, and that very same token is the one sent. There is no
-  // second token lookup in which a different session could slip in. The expected
-  // user is never sent: the backend still derives the actor from the verified JWT.
+  // PUT bound to an expected user (see requireAccessTokenFor).
   async putAsUser<TResponse, TBody>(
     expectedUserId: string,
     path: string,
     body: TBody,
     options?: AuthenticatedBackendRequestOptions,
   ): Promise<TResponse> {
+    const accessToken = await this.requireAccessTokenFor(expectedUserId);
+
+    return this.backendApiClient.put<TResponse, TBody>(path, body, {
+      ...options,
+      accessToken,
+    });
+  }
+
+  // POST bound to an expected user (see requireAccessTokenFor).
+  async postAsUser<TResponse, TBody>(
+    expectedUserId: string,
+    path: string,
+    body: TBody,
+    options?: AuthenticatedBackendRequestOptions,
+  ): Promise<TResponse> {
+    const accessToken = await this.requireAccessTokenFor(expectedUserId);
+
+    return this.backendApiClient.post<TResponse, TBody>(path, body, {
+      ...options,
+      accessToken,
+    });
+  }
+
+  // The token is read ONCE, its subject is checked against `expectedUserId`, and the
+  // caller sends that very same token. There is no second token lookup in which a
+  // different session could slip in. The expected user is never sent: the backend
+  // still derives the actor from the verified JWT.
+  private async requireAccessTokenFor(expectedUserId: string): Promise<string> {
     const accessToken = await this.requireAccessToken();
     const subject = readUnverifiedJwtSubject(accessToken);
 
@@ -91,10 +116,7 @@ export class AuthenticatedBackendApiClient {
       throw new AuthenticatedUserMismatchError();
     }
 
-    return this.backendApiClient.put<TResponse, TBody>(path, body, {
-      ...options,
-      accessToken,
-    });
+    return accessToken;
   }
 
   private async requireAccessToken(): Promise<string> {

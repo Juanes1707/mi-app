@@ -1,14 +1,15 @@
 import {
-  SET_POST_LIKE, type EnqueueSetPostLikeInput, type QueuedOfflineMutation,
-  type QueuedSetPostLikeMutation,
+  CREATE_POST_COMMENT, SET_POST_LIKE, type EnqueueCreatePostCommentInput, type EnqueueSetPostLikeInput,
+  type QueuedCreatePostCommentMutation, type QueuedOfflineMutation, type QueuedSetPostLikeMutation,
 } from '@/features/offline-sync/domain/offline-mutation';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
 import { OfflineSyncError } from '@/features/offline-sync/domain/offline-sync-error';
+import { isValidPostCommentBody } from '@/features/offline-sync/domain/post-comment-body';
 import { normalizeUuid } from '@/features/offline-sync/domain/uuid';
 import type { OfflineMutationDatabase } from './offline-mutation-database';
 import {
-  decodeOfflineMutationRow, encodeSetPostLikePayload, MUTATION_COLUMNS,
-  SET_POST_LIKE_PAYLOAD_VERSION,
+  CREATE_POST_COMMENT_PAYLOAD_VERSION, decodeOfflineMutationRow, encodeCreatePostCommentPayload,
+  encodeSetPostLikePayload, MUTATION_COLUMNS, SET_POST_LIKE_PAYLOAD_VERSION,
 } from './offline-mutation-row';
 import { SerialExecutor } from './serial-executor';
 
@@ -63,6 +64,37 @@ export class SQLiteOfflineMutationQueue implements OfflineMutationQueue {
       const row = await db.getFirstAsync<unknown>(SELECT_BY_SEQUENCE, [ownerUserId, result.lastInsertRowId]);
       const mutation = decodeOfflineMutationRow(row);
       if (mutation.kind !== SET_POST_LIKE) throw new OfflineSyncError('corrupt-data');
+      return mutation;
+    });
+  }
+
+  // Same table, same AUTOINCREMENT sequence as likes: one global replay order.
+  enqueueCreatePostComment(
+    input: EnqueueCreatePostCommentInput,
+  ): Promise<QueuedCreatePostCommentMutation> {
+    const enqueuedAtMs = this.now();
+    return this.serialized(async (db) => {
+      const ownerUserId = requireOwner(input.ownerUserId);
+      const commentId = normalizeUuid(input.commentId);
+      const postId = normalizeUuid(input.postId);
+      // Only a real null means "root": '', 'null' or undefined are rejected, not coerced.
+      const parentCommentId = input.parentCommentId === null ? null : normalizeUuid(input.parentCommentId);
+      if (commentId === null || postId === null ||
+        (input.parentCommentId !== null && parentCommentId === null) ||
+        parentCommentId === commentId ||
+        !isValidPostCommentBody(input.body) ||
+        !Number.isSafeInteger(enqueuedAtMs) || enqueuedAtMs < 0) {
+        throw new OfflineSyncError('invalid-input');
+      }
+      // The body is stored exactly as received (no trim, no normalization).
+      const payload = { commentId, postId, parentCommentId, body: input.body };
+      const result = await db.runAsync(INSERT_MUTATION, [
+        ownerUserId, CREATE_POST_COMMENT, commentId, CREATE_POST_COMMENT_PAYLOAD_VERSION,
+        encodeCreatePostCommentPayload(payload), enqueuedAtMs,
+      ]);
+      const row = await db.getFirstAsync<unknown>(SELECT_BY_SEQUENCE, [ownerUserId, result.lastInsertRowId]);
+      const mutation = decodeOfflineMutationRow(row);
+      if (mutation.kind !== CREATE_POST_COMMENT) throw new OfflineSyncError('corrupt-data');
       return mutation;
     });
   }

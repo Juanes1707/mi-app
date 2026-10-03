@@ -1,5 +1,6 @@
 import type {
-  EnqueueSetPostLikeInput, QueuedOfflineMutation, QueuedSetPostLikeMutation,
+  EnqueueCreatePostCommentInput, EnqueueSetPostLikeInput, QueuedCreatePostCommentMutation,
+  QueuedOfflineMutation, QueuedSetPostLikeMutation,
 } from './offline-mutation';
 
 // Durable, owner-scoped, strictly ordered queue of pending user intentions.
@@ -9,7 +10,12 @@ export interface OfflineMutationQueue {
   // Resolves only after the INSERT is committed: the intention is then durable.
   // Never coalesces: like, unlike, like are three distinct entries.
   enqueueSetPostLike(input: EnqueueSetPostLikeInput): Promise<QueuedSetPostLikeMutation>;
-  // Next entry to replay (lowest sequence) for that owner.
+  // Same durability, same global sequence. Never coalesces either: two comments
+  // (even with the same body, or a repeated commentId) are two entries.
+  enqueueCreatePostComment(
+    input: EnqueueCreatePostCommentInput,
+  ): Promise<QueuedCreatePostCommentMutation>;
+  // Next entry to replay (lowest sequence, any kind) for that owner.
   peekOldest(ownerUserId: string): Promise<QueuedOfflineMutation | null>;
   listPending(ownerUserId: string): Promise<QueuedOfflineMutation[]>;
   // Latest pending desired state for a post; earlier entries are kept for replay.

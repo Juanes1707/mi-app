@@ -1,7 +1,11 @@
 import type { CurrentUserProvider } from '@/features/offline-sync/application/current-user-provider';
-import type { QueuedSetPostLikeMutation } from '@/features/offline-sync/domain/offline-mutation';
+import {
+  CREATE_POST_COMMENT, SET_POST_LIKE, type QueuedCreatePostCommentMutation, type QueuedOfflineMutation,
+  type QueuedSetPostLikeMutation,
+} from '@/features/offline-sync/domain/offline-mutation';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
 import { OfflineSyncError } from '@/features/offline-sync/domain/offline-sync-error';
+import type { PostCommentRemoteGateway } from '@/features/offline-sync/domain/post-comment-remote-gateway';
 import type { PostLikeRemoteGateway } from '@/features/offline-sync/domain/post-like-remote-gateway';
 import { RemoteMutationError } from '@/features/offline-sync/domain/remote-mutation-error';
 import { normalizeUuid } from '@/features/offline-sync/domain/uuid';
@@ -12,6 +16,8 @@ export type DrainBlockReason =
   | 'owner-session-mismatch'
   | 'invalid-request'
   | 'invalid-response'
+  // The comment UUID already exists with another payload or author.
+  | 'comment-conflict'
   | 'unavailable'
   | 'corrupt-data'
   | 'unsupported-version'
@@ -56,11 +62,12 @@ function queueFailureReason(error: unknown): DrainBlockReason {
   return 'unavailable';
 }
 
-// Replays the current user's queue strictly in `sequence` order, one entry at a time:
+// Replays the current user's queue strictly in `sequence` order, one entry at a time,
+// whatever its kind (likes and comments share one global order):
 //   peek oldest → send → terminal? remove and peek again : stop, keeping the entry.
 // An entry that cannot be completed blocks everything after it: skipping it would
-// change the meaning of the user's history. No retries or timers live here; callers
-// decide when to drain again.
+// change the meaning of the user's history (and a reply must never overtake the
+// comment it answers). No retries or timers live here; callers decide when to drain.
 export class OfflineMutationProcessor {
   private activeDrain: Promise<OfflineMutationDrainResult> | null = null;
 
@@ -68,6 +75,7 @@ export class OfflineMutationProcessor {
     private readonly queue: OfflineMutationQueue,
     private readonly currentUser: CurrentUserProvider,
     private readonly postLikes: PostLikeRemoteGateway,
+    private readonly postComments: PostCommentRemoteGateway,
   ) {}
 
   // Concurrent triggers share the drain already running instead of starting another.
@@ -105,7 +113,7 @@ export class OfflineMutationProcessor {
       }
 
       // Always peek again (never a snapshot), so entries enqueued meanwhile are found.
-      let mutation: QueuedSetPostLikeMutation | null;
+      let mutation: QueuedOfflineMutation | null;
       try {
         mutation = await this.queue.peekOldest(owner);
       } catch (error: unknown) {
@@ -113,7 +121,7 @@ export class OfflineMutationProcessor {
       }
       if (mutation === null) return { kind: 'drained', ownerUserId: owner, processedCount };
 
-      const outcome = await this.sendSetPostLike(owner, mutation);
+      const outcome = await this.send(owner, mutation);
       if (outcome === 'signed-out') {
         return { kind: 'not-authenticated', ownerUserId: owner, processedCount };
       }
@@ -122,7 +130,8 @@ export class OfflineMutationProcessor {
       }
 
       // Removed only after a terminal remote outcome. If the app dies before this line,
-      // the entry is replayed later, which is safe because PUT /post-likes is idempotent.
+      // the entry is replayed later, which is safe because both commands are idempotent:
+      // PUT /post-likes sets a state, POST /post-comments replays by commentId.
       let removed: boolean;
       try {
         removed = await this.queue.remove(owner, mutation.sequence);
@@ -136,7 +145,23 @@ export class OfflineMutationProcessor {
     }
   }
 
-  // At most one remote mutation is in flight: the loop awaits each send.
+  // At most one remote mutation is in flight, across ALL kinds: the loop awaits each
+  // send before peeking the next entry. Dispatch only chooses the endpoint.
+  private send(owner: string, mutation: QueuedOfflineMutation): Promise<SendOutcome> {
+    switch (mutation.kind) {
+      case SET_POST_LIKE:
+        return this.sendSetPostLike(owner, mutation);
+      case CREATE_POST_COMMENT:
+        return this.sendCreatePostComment(owner, mutation);
+      default: {
+        // Unreachable: the decoder only yields known kinds.
+        const unknownKind: never = mutation;
+        void unknownKind;
+        return Promise.resolve('corrupt-data');
+      }
+    }
+  }
+
   private async sendSetPostLike(
     owner: string,
     mutation: QueuedSetPostLikeMutation,
@@ -148,13 +173,43 @@ export class OfflineMutationProcessor {
       // `updated` and the contractual `not-found` both finish this command.
       return result.postId === postId ? 'terminal' : 'invalid-response';
     } catch (error: unknown) {
-      if (!(error instanceof RemoteMutationError)) return 'unavailable';
-      if (error.code === 'authentication-required') {
-        const current = await this.readCurrentUser();
-        return current.kind === 'signed-out' ? 'signed-out' : 'authentication-required';
-      }
-      return error.code;
+      return this.classifyFailure(error);
     }
+  }
+
+  private async sendCreatePostComment(
+    owner: string,
+    mutation: QueuedCreatePostCommentMutation,
+  ): Promise<SendOutcome> {
+    const { commentId, postId, parentCommentId, body } = mutation.payload;
+    try {
+      const result = await this.postComments.createComment({
+        expectedOwnerUserId: owner, commentId, postId, parentCommentId, body,
+      });
+      switch (result.kind) {
+        // Created now or an exact replay of an earlier send: either way it exists.
+        case 'confirmed':
+          return normalizeUuid(result.comment.id) === commentId ? 'terminal' : 'invalid-response';
+        // The comment can never be applied (post gone or hidden, parent gone or under
+        // another post): finished, so it does not block the queue forever.
+        case 'post-not-found':
+        case 'parent-not-found':
+          return 'terminal';
+        case 'profile-not-ready':
+          return 'profile-not-ready';
+      }
+    } catch (error: unknown) {
+      return this.classifyFailure(error);
+    }
+  }
+
+  private async classifyFailure(error: unknown): Promise<SendOutcome> {
+    if (!(error instanceof RemoteMutationError)) return 'unavailable';
+    if (error.code === 'authentication-required') {
+      const current = await this.readCurrentUser();
+      return current.kind === 'signed-out' ? 'signed-out' : 'authentication-required';
+    }
+    return error.code;
   }
 
   private async readCurrentUser(): Promise<CurrentUserRead> {
