@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useRef } from 'react';
 import {
   ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, Text, View,
   type ListRenderItem,
@@ -7,6 +7,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset } from '@/constants/theme';
+import { getFeedInvalidationVersion } from '@/features/feed/application/feed-invalidation';
 import type { FeedPost } from '@/features/feed/domain/entities/feed-post';
 import type { FeedErrorCode } from '@/features/feed/domain/errors/feed-error';
 import { PostCard } from '@/features/feed/presentation/components/post-card';
@@ -20,6 +21,17 @@ const messages: Record<FeedErrorCode, string> = {
   unavailable: 'No pudimos cargar las publicaciones. Revisa tu conexión e inténtalo de nuevo.',
 };
 const getPostKey = (post: FeedPost) => post.id;
+
+function CreatePostButton() {
+  const router = useRouter();
+  const theme = useTheme();
+  return (
+    <Pressable accessibilityRole="button" onPress={() => router.push('/home/create')}
+      style={[styles.retry, { backgroundColor: theme.backgroundElement }]}>
+      <Text style={[styles.retryText, { color: theme.text }]}>Crear publicación</Text>
+    </Pressable>
+  );
+}
 
 function Feedback({ message, onRetry }: { message: string; onRetry?: () => void }) {
   const theme = useTheme();
@@ -43,6 +55,7 @@ function FeedHeader() {
     <View style={[styles.header, { borderBottomColor: theme.backgroundElement }]}>
       <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Inicio</Text>
       <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Momentos de tu comunidad</Text>
+      <CreatePostButton />
     </View>
   );
 }
@@ -56,6 +69,14 @@ export function FeedScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { state, refresh, retryInitial, onEndReached, retryLoadMore } = useFeed();
+  const lastSeenInvalidation = useRef(getFeedInvalidationVersion());
+  useFocusEffect(useCallback(() => {
+    const version = getFeedInvalidationVersion();
+    if (version === lastSeenInvalidation.current ||
+      state.operation === 'initial' || state.operation === 'refreshing') return;
+    lastSeenInvalidation.current = version;
+    void refresh();
+  }, [refresh, state.operation]));
   const openAuthor = useCallback((profileId: string) => {
     router.push({ pathname: '/home/profile/[profileId]', params: { profileId } });
   }, [router]);
@@ -68,6 +89,7 @@ export function FeedScreen() {
       <SafeAreaView style={[styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator color={theme.text} size="large" />
         <Feedback message="Cargando publicaciones..." />
+        <CreatePostButton />
       </SafeAreaView>
     );
   }
@@ -75,6 +97,7 @@ export function FeedScreen() {
     return (
       <SafeAreaView style={[styles.centered, { backgroundColor: theme.background }]}>
         <Feedback message={messages[state.error?.code ?? 'unavailable']} onRetry={retryInitial} />
+        <CreatePostButton />
       </SafeAreaView>
     );
   }
