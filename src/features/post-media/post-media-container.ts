@@ -26,6 +26,7 @@ const diskCache = new DiskImageCache(new ExpoDiskCacheFileSystem(POST_MEDIA_DISK
   budgetBytes: POST_MEDIA_DISK_BUDGET_BYTES,
   maxFileBytes: POST_MEDIA_MAX_FILE_BYTES,
 });
+const decoder = new ExpoImageDecoder();
 
 export const postImageSource: PostImageSource<ImageRef> = new PostImageLoader<ImageRef>({
   authorizer: new AuthorizePostMediaRead(
@@ -34,9 +35,12 @@ export const postImageSource: PostImageSource<ImageRef> = new PostImageLoader<Im
   memory: memoryCache,
   disk: diskCache,
   downloader: new ExpoPostMediaDownloader(),
-  decoder: new ExpoImageDecoder(),
+  decoder,
 });
 
 export function bindPostMediaMemoryPressure(): () => void {
-  return subscribeToMemoryPressure(() => memoryCache.clear());
+  return subscribeToMemoryPressure(() => {
+    memoryCache.clear();
+    void decoder.purgeInternalCaches();
+  });
 }

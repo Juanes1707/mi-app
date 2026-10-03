@@ -1,6 +1,3 @@
-// WHATWG URL parsing is required below; the polyfill is idempotent.
-import 'react-native-url-polyfill/auto';
-
 import type { AuthorizedPostMedia } from '@/features/post-media/domain/authorized-post-media';
 import { PostMediaError } from '@/features/post-media/domain/post-media-error';
 
@@ -18,6 +15,8 @@ function isText(value: unknown): value is string {
 
 // Only the properties we consume: an absolute http(s) URL without embedded
 // credentials. Storage's internal routing (path layout, token name) is not ours to check.
+// `URL` is the WHATWG polyfill installed globally by the Supabase bootstrap, which the
+// authenticated backend client (required to reach this parser) always loads first.
 function isUsableSignedUrl(value: string): boolean {
   let url: URL;
   try {

@@ -27,9 +27,11 @@ export interface PostMediaDownloader {
   download(url: string, destinationUri: string, signal: AbortSignal): Promise<void>;
 }
 
-// Decodes a LOCAL file only. Remote URLs never reach the decoder.
+// Decodes a LOCAL file only. Remote URLs never reach the decoder. Any copy the
+// decoding library keeps on its own must be dropped by `purgeInternalCaches()`.
 export interface PostImageDecoder<TImage> {
   decode(localFileUri: string): Promise<TImage>;
+  purgeInternalCaches(): Promise<void>;
 }
 
 export type PostImageLoaderDependencies<TImage> = {
@@ -149,6 +151,7 @@ export class PostImageLoader<TImage> implements PostImageSource<TImage> {
         // Deleted post or revoked access: local bytes must not outlive the permission.
         memory.delete(imagePath);
         await disk.remove(imagePath).catch(() => undefined);
+        await this.deps.decoder.purgeInternalCaches();
       }
       this.settle(job, { status: 'failed', error: failure });
     }
