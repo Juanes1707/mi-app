@@ -1,8 +1,8 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, Text, View,
-  type ListRenderItem,
+  type ListRenderItem, type ViewabilityConfig, type ViewToken,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -12,6 +12,8 @@ import type { FeedPost } from '@/features/feed/domain/entities/feed-post';
 import type { FeedErrorCode } from '@/features/feed/domain/errors/feed-error';
 import { PostCard } from '@/features/feed/presentation/components/post-card';
 import { useFeed } from '@/features/feed/presentation/hooks/use-feed';
+import { collectVisiblePostIds } from '@/features/feed/presentation/visible-post-ids';
+import { usePostMediaMemoryPressure } from '@/features/post-media/presentation/hooks/use-post-media-memory-pressure';
 import { useTheme } from '@/hooks/use-theme';
 
 const messages: Record<FeedErrorCode, string> = {
@@ -21,6 +23,14 @@ const messages: Record<FeedErrorCode, string> = {
   unavailable: 'No pudimos cargar las publicaciones. Revisa tu conexión e inténtalo de nuevo.',
 };
 const getPostKey = (post: FeedPost) => post.id;
+// Module-level, so FlatList sees the same object for its whole lifetime.
+// minimumViewTime keeps cells crossed during a fast fling from starting downloads.
+const MEDIA_VIEWABILITY_CONFIG: ViewabilityConfig = {
+  itemVisiblePercentThreshold: 20,
+  minimumViewTime: 100,
+  waitForInteraction: false,
+};
+const NO_VISIBLE_POSTS: ReadonlySet<string> = new Set();
 
 function CreatePostButton() {
   const router = useRouter();
@@ -80,8 +90,23 @@ export function FeedScreen() {
   const openAuthor = useCallback((profileId: string) => {
     router.push({ pathname: '/home/profile/[profileId]', params: { profileId } });
   }, [router]);
+  usePostMediaMemoryPressure();
+  const [visiblePostIds, setVisiblePostIds] = useState(NO_VISIBLE_POSTS);
+  // FlatList does not support changing this callback on the fly: keep one identity.
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken<FeedPost>[] }) => {
+      setVisiblePostIds((previous) => collectVisiblePostIds(viewableItems, previous));
+    },
+  ).current;
   const renderPost: ListRenderItem<FeedPost> = useCallback(
-    ({ item }) => <PostCard post={item} onOpenAuthor={openAuthor} />, [openAuthor],
+    ({ item }) => (
+      <PostCard
+        post={item}
+        isMediaVisible={visiblePostIds.has(item.id)}
+        onOpenAuthor={openAuthor}
+      />
+    ),
+    [openAuthor, visiblePostIds],
   );
 
   if (state.status === 'initial-loading') {
@@ -107,6 +132,7 @@ export function FeedScreen() {
       <FlatList
         contentContainerStyle={styles.listContent}
         data={state.page.posts}
+        extraData={visiblePostIds}
         ItemSeparatorComponent={PostSeparator}
         keyExtractor={getPostKey}
         ListHeaderComponent={
@@ -136,10 +162,12 @@ export function FeedScreen() {
         }
         onEndReached={onEndReached}
         onEndReachedThreshold={0.5}
+        onViewableItemsChanged={onViewableItemsChanged}
         onRefresh={refresh}
         refreshing={state.operation === 'refreshing'}
         renderItem={renderPost}
         showsVerticalScrollIndicator={false}
+        viewabilityConfig={MEDIA_VIEWABILITY_CONFIG}
       />
     </SafeAreaView>
   );

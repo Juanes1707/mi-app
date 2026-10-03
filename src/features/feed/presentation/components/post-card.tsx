@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { FeedPost } from '@/features/feed/domain/entities/feed-post';
+import { PostMediaImage } from '@/features/post-media/presentation/components/post-media-image';
 import { useTheme } from '@/hooks/use-theme';
 
 const dateFormatter = new Intl.DateTimeFormat('es-CO', {
@@ -9,8 +10,8 @@ const dateFormatter = new Intl.DateTimeFormat('es-CO', {
 });
 
 export const PostCard = memo(function PostCard({
-  post, onOpenAuthor,
-}: { post: FeedPost; onOpenAuthor: (profileId: string) => void }) {
+  post, isMediaVisible, onOpenAuthor,
+}: { post: FeedPost; isMediaVisible: boolean; onOpenAuthor: (profileId: string) => void }) {
   const theme = useTheme();
   const username = post.author.username?.trim();
   const name = post.author.displayName?.trim() || username || 'Usuario';
@@ -34,9 +35,11 @@ export const PostCard = memo(function PostCard({
         </View>
       </Pressable>
 
-      <View style={[styles.media, { backgroundColor: theme.backgroundElement }]}>
-        <Text style={{ color: theme.textSecondary }}>Imagen</Text>
-      </View>
+      <PostMediaImage
+        accessibilityLabel={`Publicación de ${name}`}
+        imagePath={post.imagePath}
+        isVisible={isMediaVisible}
+      />
 
       <View style={styles.details}>
         <Text
@@ -69,7 +72,6 @@ const styles = StyleSheet.create({
   authorText: { flex: 1, minWidth: 0 },
   name: { fontSize: 14, fontWeight: '700', lineHeight: 20 },
   username: { fontSize: 12, lineHeight: 18 },
-  media: { aspectRatio: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
   details: { gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
   likes: { fontSize: 16, fontWeight: '600', lineHeight: 24 },
   liked: { color: '#D92545' },
