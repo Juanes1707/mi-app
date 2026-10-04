@@ -44,12 +44,19 @@ const INDEX_FILE_NAME = 'index.json';
 const INDEX_VERSION = 1;
 const DEFAULT_TOUCH_PERSIST_DELAY_MS = 1000;
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const IMAGE_PATH_PATTERN = new RegExp(`^(${UUID})/(${UUID})\\.(jpg|png|webp)$`);
+// Cache keys are stable media identities, never URLs. Post media keeps its original
+// key space (the bare `author/media.ext` imagePath, as already persisted on devices);
+// every other bucket is namespaced (`story-media:author/media.ext`), so the same
+// object path in two buckets can never share a RAM entry, an index entry or a file.
+const CACHE_KEY_PATTERN = new RegExp(`^(?:(story-media):)?(${UUID})/(${UUID})\\.(jpg|png|webp)$`);
 
-// `author/media.ext` → `author__media.ext`: deterministic, flat and free of separators.
-export function toCacheFileName(imagePath: string): string | null {
-  const match = IMAGE_PATH_PATTERN.exec(imagePath);
-  return match ? `${match[1]}__${match[2]}.${match[3]}` : null;
+// `author/media.ext` → `author__media.ext`, `story-media:author/media.ext` →
+// `story-media__author__media.ext`: deterministic, flat and free of separators.
+export function toCacheFileName(cacheKey: string): string | null {
+  const match = CACHE_KEY_PATTERN.exec(cacheKey);
+  if (!match) return null;
+  const file = `${match[2]}__${match[3]}.${match[4]}`;
+  return match[1] === undefined ? file : `${match[1]}__${file}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -20,3 +20,8 @@ export interface StoriesRepository {
 export interface StoryImageUploader {
   upload(image: LocalStoryImage, ticket: StoryUploadTicket): Promise<void>;
 }
+
+// Picks ONE static image from the device library; null when the user cancels.
+export interface StoryImageSelector {
+  select(): Promise<LocalStoryImage | null>;
+}

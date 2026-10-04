@@ -15,7 +15,9 @@ import {
   POST_MEDIA_DISK_BUDGET_BYTES, POST_MEDIA_DISK_DIRECTORY, POST_MEDIA_MAX_FILE_BYTES,
   POST_MEDIA_MEMORY_BUDGET_BYTES,
 } from '@/features/post-media/infrastructure/post-media-cache-limits';
-import { PostImageLoader } from '@/features/post-media/infrastructure/post-image-loader';
+import {
+  PostImageLoader, type PostMediaReadAuthorizer,
+} from '@/features/post-media/infrastructure/post-image-loader';
 import { authenticatedBackendApiClient } from '@/infrastructure/api/backend-api-container';
 
 const memoryCache = new LruMemoryImageCache<ImageRef>(
@@ -27,6 +29,7 @@ const diskCache = new DiskImageCache(new ExpoDiskCacheFileSystem(POST_MEDIA_DISK
   maxFileBytes: POST_MEDIA_MAX_FILE_BYTES,
 });
 const decoder = new ExpoImageDecoder();
+const downloader = new ExpoPostMediaDownloader();
 
 export const postImageSource: PostImageSource<ImageRef> = new PostImageLoader<ImageRef>({
   authorizer: new AuthorizePostMediaRead(
@@ -34,9 +37,17 @@ export const postImageSource: PostImageSource<ImageRef> = new PostImageLoader<Im
   ),
   memory: memoryCache,
   disk: diskCache,
-  downloader: new ExpoPostMediaDownloader(),
+  downloader,
   decoder,
 });
+
+// Other private media (Stories) reuse THIS two-level cache: the same RAM LRU, disk LRU,
+// downloader and decoder, so there is one memory budget and one disk budget. Each
+// source has its own authorizer and its own in-flight jobs; its keys must be namespaced
+// (see toCacheFileName) and every acquisition is still authorized before any cache hit.
+export function createAuthorizedImageSource(authorizer: PostMediaReadAuthorizer): PostImageSource<ImageRef> {
+  return new PostImageLoader<ImageRef>({ authorizer, memory: memoryCache, disk: diskCache, downloader, decoder });
+}
 
 export function bindPostMediaMemoryPressure(): () => void {
   return subscribeToMemoryPressure(() => {

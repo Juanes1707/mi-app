@@ -17,6 +17,9 @@ import { useOptimisticPostLikes } from '@/features/feed/presentation/hooks/use-o
 import { collectVisiblePostIds } from '@/features/feed/presentation/visible-post-ids';
 import { usePostMediaMemoryPressure } from '@/features/post-media/presentation/hooks/use-post-media-memory-pressure';
 import { sharePostReference } from '@/features/post-sharing/application/share-post-reference';
+import { StoryTrayBar } from '@/features/stories/presentation/components/story-tray-bar';
+import { useStoryPublication } from '@/features/stories/presentation/hooks/use-story-publication';
+import { useStoryTray } from '@/features/stories/presentation/hooks/use-story-tray';
 import { useTheme } from '@/hooks/use-theme';
 
 const messages: Record<FeedErrorCode, string> = {
@@ -93,6 +96,20 @@ export function FeedScreen() {
   // Owner comes from the in-memory auth state: no auth/network round trip per tap.
   const { user } = useAuth();
   const likes = useOptimisticPostLikes(user?.id ?? null, refreshAfterChange);
+  // Stories tray above the Feed: first page refreshed on focus (coalesced), after a
+  // publication and with pull-to-refresh. No polling.
+  const storyOwnerId = user?.id.toLowerCase() ?? null;
+  const stories = useStoryTray(storyOwnerId);
+  const refreshStories = stories.refresh;
+  const storyPublication = useStoryPublication(storyOwnerId, refreshStories);
+  useFocusEffect(useCallback(() => { refreshStories(); }, [refreshStories]));
+  const openStories = useCallback((authorId: string) => {
+    router.push({ pathname: '/stories/[authorId]', params: { authorId } });
+  }, [router]);
+  const refreshAll = useCallback(() => {
+    void refresh();
+    refreshStories();
+  }, [refresh, refreshStories]);
   const lastSeenInvalidation = useRef(getFeedInvalidationVersion());
   useFocusEffect(useCallback(() => {
     const version = getFeedInvalidationVersion();
@@ -185,6 +202,20 @@ export function FeedScreen() {
         ListHeaderComponent={
           <>
             <FeedHeader />
+            <StoryTrayBar
+              ownerInitialSource={user?.email ?? 'Tú'}
+              tray={stories.state}
+              isFullySeen={stories.isFullySeen}
+              publication={storyPublication.state}
+              publishing={storyPublication.busy}
+              onOpenAuthor={openStories}
+              onAddStory={storyPublication.pickAndPublish}
+              onRetryTray={refreshStories}
+              onLoadMore={stories.loadMore}
+              onRetryLoadMore={stories.retryLoadMore}
+              onRetryPublication={storyPublication.retry}
+              onDiscardPublication={storyPublication.discard}
+            />
             {state.refreshError ? (
               <Feedback message={messages[state.refreshError.code]} onRetry={refresh} />
             ) : null}
@@ -216,7 +247,7 @@ export function FeedScreen() {
         onEndReached={onEndReached}
         onEndReachedThreshold={0.5}
         onViewableItemsChanged={onViewableItemsChanged}
-        onRefresh={refresh}
+        onRefresh={refreshAll}
         refreshing={state.operation === 'refreshing'}
         renderItem={renderPost}
         showsVerticalScrollIndicator={false}

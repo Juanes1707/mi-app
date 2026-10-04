@@ -80,3 +80,6 @@ export function compareTrayPositions(
   if (byTime !== 0) return byTime;
   return left.authorId > right.authorId ? -1 : left.authorId < right.authorId ? 1 : 0;
 }
+
+// Every static image Story plays for exactly this long (the single source of truth).
+export const STORY_IMAGE_DURATION_MS = 5000;
