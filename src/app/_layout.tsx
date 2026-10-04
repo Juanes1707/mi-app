@@ -34,7 +34,7 @@ function AuthenticatedContent() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack key={user.id} screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="(tabs)" />
     </Stack>
