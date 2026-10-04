@@ -64,11 +64,19 @@ function Feedback({ message, onRetry }: { message: string; onRetry?: () => void 
 
 function FeedHeader() {
   const theme = useTheme();
+  const router = useRouter();
   return (
     <View style={[styles.header, { borderBottomColor: theme.backgroundElement }]}>
       <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Inicio</Text>
       <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Momentos de tu comunidad</Text>
-      <CreatePostButton />
+      <View style={styles.headerActions}>
+        <CreatePostButton />
+        <Pressable accessibilityRole="button" accessibilityLabel="Mensajes"
+          onPress={() => router.push('/messages')}
+          style={[styles.retry, { backgroundColor: theme.backgroundElement }]}>
+          <Text style={[styles.retryText, { color: theme.text }]}>Mensajes</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -229,6 +237,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 26, fontWeight: '800', letterSpacing: -0.6, lineHeight: 32 },
   subtitle: { fontSize: 13, lineHeight: 18 },
+  headerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 6 },
   separator: { height: 8 },
   centered: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: 24 },
   feedback: { alignItems: 'center', gap: 12, padding: 20 },

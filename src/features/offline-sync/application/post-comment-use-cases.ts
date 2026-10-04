@@ -7,11 +7,7 @@ import {
   selectPendingPostComments, type PendingPostComment,
 } from '@/features/offline-sync/domain/post-comment-projection';
 import { normalizeUuid } from '@/features/offline-sync/domain/uuid';
-
-export interface UuidGenerator {
-  // A random (v4) UUID in canonical lowercase form, produced synchronously.
-  generate(): string;
-}
+import type { UuidGenerator } from '@/shared/application/uuid-generator';
 
 // The comment's identity is created on the device, before anything is persisted or
 // sent: the optimistic row, the SQLite entry and every replay share this UUID, which

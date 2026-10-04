@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -10,6 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { useAuth } from '@/features/auth/presentation/hooks/use-auth';
+import { getOrCreateDirectConversation } from '@/features/direct-messages/direct-messages-container';
 import { FollowError, type FollowErrorCode } from '@/features/follow/domain/errors/follow-error';
 import { requestFollow } from '@/features/follow/follow-container';
 import type { ViewedProfile } from '@/features/profile-view/domain/entities/viewed-profile';
@@ -31,18 +34,26 @@ type ProfileViewScreenState =
 
 export function ProfileViewScreen({ profileId }: ProfileViewScreenProps) {
   const theme = useTheme();
+  const router = useRouter();
+  const { user } = useAuth();
   const isMountedRef = useRef(true);
   const currentRouteProfileIdRef = useRef(profileId);
   const loadGenerationRef = useRef(0);
   const followGenerationRef = useRef(0);
   const followInFlightRef = useRef(false);
   const visibleProfileIdRef = useRef<string | null>(null);
+  const messageGenerationRef = useRef(0);
+  const messageInFlightRef = useRef(false);
+  const currentOwnerUserIdRef = useRef<string | null>(user?.id.toLowerCase() ?? null);
   const [state, setState] = useState<ProfileViewScreenState>({ status: 'loading' });
   const [loadVersion, setLoadVersion] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followErrorMessage, setFollowErrorMessage] = useState<string | null>(null);
+  const [isOpeningMessage, setIsOpeningMessage] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
 
   currentRouteProfileIdRef.current = profileId;
+  currentOwnerUserIdRef.current = user?.id.toLowerCase() ?? null;
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -53,6 +64,8 @@ export function ProfileViewScreen({ profileId }: ProfileViewScreenProps) {
       followGenerationRef.current += 1;
       followInFlightRef.current = false;
       visibleProfileIdRef.current = null;
+      messageGenerationRef.current += 1;
+      messageInFlightRef.current = false;
     };
   }, []);
 
@@ -63,10 +76,14 @@ export function ProfileViewScreen({ profileId }: ProfileViewScreenProps) {
     followGenerationRef.current += 1;
     followInFlightRef.current = false;
     visibleProfileIdRef.current = null;
+    messageGenerationRef.current += 1;
+    messageInFlightRef.current = false;
 
     setState({ status: 'loading' });
     setIsFollowing(false);
     setFollowErrorMessage(null);
+    setIsOpeningMessage(false);
+    setMessageError(null);
 
     void getProfileView
       .execute(profileId)
@@ -207,6 +224,35 @@ export function ProfileViewScreen({ profileId }: ProfileViewScreenProps) {
     }
   };
 
+  const handleMessage = async () => {
+    if (state.status !== 'success' || state.profile.isSelf || messageInFlightRef.current) return;
+    const ownerUserId = currentOwnerUserIdRef.current;
+    if (ownerUserId === null) { setMessageError('Tu sesión no está disponible.'); return; }
+    const targetProfileId = state.profile.id;
+    const routeProfileId = profileId;
+    const generation = ++messageGenerationRef.current;
+    messageInFlightRef.current = true;
+    setIsOpeningMessage(true);
+    setMessageError(null);
+    try {
+      const conversation = await getOrCreateDirectConversation.execute(ownerUserId, targetProfileId);
+      if (!isMountedRef.current || generation !== messageGenerationRef.current ||
+          currentOwnerUserIdRef.current !== ownerUserId || currentRouteProfileIdRef.current !== routeProfileId ||
+          visibleProfileIdRef.current !== targetProfileId) return;
+      router.push({ pathname: '/messages/[conversationId]', params: { conversationId: conversation.id } });
+    } catch {
+      if (isMountedRef.current && generation === messageGenerationRef.current &&
+          currentOwnerUserIdRef.current === ownerUserId && visibleProfileIdRef.current === targetProfileId) {
+        setMessageError('No pudimos abrir la conversación.');
+      }
+    } finally {
+      if (generation === messageGenerationRef.current) {
+        messageInFlightRef.current = false;
+        if (isMountedRef.current) setIsOpeningMessage(false);
+      }
+    }
+  };
+
   if (state.status === 'loading') {
     return (
       <ProfileViewStatusLayout>
@@ -299,6 +345,22 @@ export function ProfileViewScreen({ profileId }: ProfileViewScreenProps) {
             profile={profile}
             visibleName={visibleName}
           />
+
+          {!profile.isSelf ? (
+            <Pressable
+              accessibilityLabel={`Enviar mensaje a ${visibleName}`}
+              accessibilityRole="button"
+              disabled={isOpeningMessage}
+              onPress={handleMessage}
+              style={({ pressed }) => [styles.messageButton,
+                pressed && !isOpeningMessage ? styles.pressed : undefined,
+                isOpeningMessage ? styles.disabled : undefined]}>
+              {isOpeningMessage ? <ActivityIndicator color="#208AEF" size="small" /> : null}
+              <Text style={styles.messageButtonText}>{isOpeningMessage ? 'Abriendo...' : 'Mensaje'}</Text>
+            </Pressable>
+          ) : null}
+
+          {messageError ? <Text accessibilityLiveRegion="polite" style={styles.actionError}>{messageError}</Text> : null}
 
           {followErrorMessage ? (
             <Text accessibilityLiveRegion="polite" style={styles.actionError}>
@@ -558,6 +620,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 20,
   },
+  messageButton: {
+    alignItems: 'center', borderColor: '#208AEF', borderRadius: 12, borderWidth: 1,
+    flexDirection: 'row', gap: Spacing.two, justifyContent: 'center', minHeight: 48,
+    minWidth: 136, paddingHorizontal: Spacing.four, paddingVertical: Spacing.two,
+  },
+  messageButtonText: { color: '#208AEF', fontSize: 15, fontWeight: '700', lineHeight: 20 },
   followingContent: {
     alignItems: 'center',
     flexDirection: 'row',

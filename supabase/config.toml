@@ -39,3 +39,9 @@ verify_jwt = true
 
 [functions.post-comment]
 verify_jwt = true
+
+[functions.direct-conversations]
+verify_jwt = true
+
+[functions.direct-messages]
+verify_jwt = true

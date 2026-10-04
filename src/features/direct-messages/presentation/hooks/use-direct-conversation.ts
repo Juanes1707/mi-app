@@ -1,0 +1,195 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import {
+  createDirectMessageId, getDirectMessagesPage, sendDirectMessage,
+} from '@/features/direct-messages/direct-messages-container';
+import type { DirectMessage, DirectMessagesPage } from '@/features/direct-messages/domain/direct-message';
+import { DirectMessagesError } from '@/features/direct-messages/domain/direct-messages-error';
+import { compareDirectPositions, isValidDirectMessageBody } from '@/features/direct-messages/domain/direct-message-values';
+
+type PendingSend = { messageId: string; body: string; status: 'sending' | 'error' };
+type ConversationState = {
+  ownerUserId: string; conversationId: string;
+  status: 'loading' | 'ready' | 'error' | 'not-found';
+  page: DirectMessagesPage;
+  operation: 'idle' | 'initial' | 'refreshing' | 'loading-more';
+  error: DirectMessagesError | null;
+  refreshError: DirectMessagesError | null;
+  loadMoreError: DirectMessagesError | null;
+};
+const emptyPage: DirectMessagesPage = { messages: [], nextCursor: null };
+const normalizeError = (value: unknown) => value instanceof DirectMessagesError
+  ? value : new DirectMessagesError('unavailable');
+
+export function useDirectConversation(ownerUserId: string, conversationId: string) {
+  const [state, setState] = useState<ConversationState>(() => initial(ownerUserId, conversationId));
+  const [draft, setDraftState] = useState('');
+  const [pendingSend, setPendingSend] = useState<PendingSend | null>(null);
+  const stateRef = useRef(state);
+  const pendingRef = useRef(pendingSend);
+  const mountedRef = useRef(false);
+  const generationRef = useRef(0);
+  const scopeRef = useRef(`${ownerUserId}:${conversationId}`);
+  scopeRef.current = `${ownerUserId}:${conversationId}`;
+  const publish = useCallback((next: ConversationState) => { stateRef.current = next; setState(next); }, []);
+  const publishPending = useCallback((next: PendingSend | null) => { pendingRef.current = next; setPendingSend(next); }, []);
+  const current = useCallback((generation: number) => mountedRef.current &&
+    generationRef.current === generation && stateRef.current.ownerUserId === ownerUserId &&
+    stateRef.current.conversationId === conversationId, [ownerUserId, conversationId]);
+  const currentScope = useCallback(() => mountedRef.current &&
+    scopeRef.current === `${ownerUserId}:${conversationId}`, [ownerUserId, conversationId]);
+
+  const loadFirst = useCallback(async () => {
+    const previous = stateRef.current;
+    if (!mountedRef.current || previous.ownerUserId !== ownerUserId || previous.conversationId !== conversationId ||
+        previous.operation === 'initial' || previous.operation === 'refreshing') return false;
+    const generation = ++generationRef.current;
+    const hasPage = previous.status === 'ready';
+    publish({ ...previous, status: hasPage ? 'ready' : 'loading',
+      operation: hasPage ? 'refreshing' : 'initial', error: null, refreshError: null, loadMoreError: null });
+    try {
+      const page = await getDirectMessagesPage.execute(ownerUserId, conversationId, null);
+      if (!current(generation)) return false;
+      const messages = keepNewerKnownMessages(page.messages, stateRef.current.page.messages);
+      publish({ ownerUserId, conversationId, status: 'ready', page: { ...page, messages }, operation: 'idle',
+        error: null, refreshError: null, loadMoreError: null });
+      return true;
+    } catch (error: unknown) {
+      if (!current(generation)) return false;
+      const normalized = normalizeError(error);
+      // The latest state, not `previous`: a send confirmed during the failed read stays.
+      const latest = stateRef.current;
+      if (normalized.code === 'conversation-not-found') {
+        publish({ ...latest, status: 'not-found', page: emptyPage, operation: 'idle', error: normalized,
+          refreshError: null, loadMoreError: null });
+      } else {
+        publish({ ...latest, status: hasPage ? 'ready' : 'error', operation: 'idle',
+          error: hasPage ? null : normalized, refreshError: hasPage ? normalized : null, loadMoreError: null });
+      }
+      return false;
+    }
+  }, [ownerUserId, conversationId, current, publish]);
+
+  const loadMore = useCallback(async (retry = false) => {
+    const previous = stateRef.current;
+    if (!mountedRef.current || previous.ownerUserId !== ownerUserId || previous.conversationId !== conversationId ||
+        previous.status !== 'ready' || previous.operation !== 'idle' ||
+        previous.page.nextCursor === null || (previous.loadMoreError !== null && !retry)) return;
+    const generation = generationRef.current;
+    publish({ ...previous, operation: 'loading-more', loadMoreError: null });
+    try {
+      const page = await getDirectMessagesPage.execute(ownerUserId, conversationId, previous.page.nextCursor);
+      if (!current(generation)) return;
+      // Re-read the state: a send confirmed while this page was loading must survive.
+      const latest = stateRef.current;
+      publish({ ...latest, page: { messages: mergeMessages(latest.page.messages, page.messages),
+        nextCursor: page.nextCursor }, operation: 'idle', loadMoreError: null });
+    } catch (error: unknown) {
+      if (!current(generation)) return;
+      const normalized = normalizeError(error);
+      const latest = stateRef.current;
+      if (normalized.code === 'conversation-not-found') {
+        publish({ ...latest, status: 'not-found', page: emptyPage, operation: 'idle', error: normalized,
+          refreshError: null, loadMoreError: null });
+      } else publish({ ...latest, operation: 'idle', loadMoreError: normalized });
+    }
+  }, [ownerUserId, conversationId, current, publish]);
+
+  const attemptSend = useCallback(async (intention: PendingSend) => {
+    if (!mountedRef.current || pendingRef.current?.status === 'sending') return;
+    publishPending({ ...intention, status: 'sending' });
+    try {
+      const message = await sendDirectMessage.execute(
+        ownerUserId, conversationId, intention.messageId, intention.body,
+      );
+      if (!currentScope() || pendingRef.current?.messageId !== intention.messageId) return;
+      const previous = stateRef.current;
+      if (previous.status === 'ready') {
+        publish({ ...previous, page: { ...previous.page, messages: mergeMessage(previous.page.messages, message) } });
+      }
+      publishPending(null);
+      // Only the text that was sent is cleared; anything typed meanwhile stays.
+      setDraftState((value) => value === intention.body ? '' : value);
+    } catch (error: unknown) {
+      if (!currentScope() || pendingRef.current?.messageId !== intention.messageId) return;
+      const normalized = normalizeError(error);
+      if (normalized.code === 'conversation-not-found') {
+        generationRef.current += 1;
+        publish({ ...stateRef.current, status: 'not-found', page: emptyPage, operation: 'idle', error: normalized,
+          refreshError: null, loadMoreError: null });
+      }
+      publishPending({ ...intention, status: 'error' });
+    }
+  }, [ownerUserId, conversationId, currentScope, publish, publishPending]);
+
+  const send = useCallback(() => {
+    if (pendingRef.current !== null || !isValidDirectMessageBody(draft)) return;
+    const intention: PendingSend = { messageId: createDirectMessageId.execute(), body: draft, status: 'error' };
+    void attemptSend(intention);
+  }, [draft, attemptSend]);
+  const retrySend = useCallback(() => {
+    const intention = pendingRef.current;
+    if (intention?.status === 'error') void attemptSend(intention);
+  }, [attemptSend]);
+  const discardFailedSend = useCallback(() => {
+    if (pendingRef.current?.status === 'error') publishPending(null);
+  }, [publishPending]);
+  const setDraft = useCallback((value: string) => {
+    if (pendingRef.current?.status === 'error' && value !== pendingRef.current.body) publishPending(null);
+    setDraftState(value);
+  }, [publishPending]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const next = initial(ownerUserId, conversationId);
+    stateRef.current = next; setState(next); pendingRef.current = null; setPendingSend(null); setDraftState('');
+    void loadFirst();
+    return () => { mountedRef.current = false; generationRef.current += 1; stateRef.current.operation = 'idle'; };
+  }, [ownerUserId, conversationId, loadFirst]);
+
+  return {
+    state: state.ownerUserId === ownerUserId && state.conversationId === conversationId
+      ? state : initial(ownerUserId, conversationId),
+    draft, setDraft, pendingSend, send, retrySend, discardFailedSend,
+    refresh: loadFirst, retry: loadFirst,
+    onEndReached: useCallback(() => { void loadMore(); }, [loadMore]),
+    retryLoadMore: useCallback(() => { void loadMore(true); }, [loadMore]),
+  };
+}
+
+function initial(ownerUserId: string, conversationId: string): ConversationState {
+  return { ownerUserId, conversationId, status: 'loading', page: emptyPage, operation: 'idle',
+    error: null, refreshError: null, loadMoreError: null };
+}
+export function mergeMessage(messages: DirectMessage[], message: DirectMessage): DirectMessage[] {
+  return mergeMessages(messages, [message]);
+}
+// Same id must mean the same message: an incompatible copy is never overwritten.
+export function mergeMessages(messages: DirectMessage[], incoming: DirectMessage[]): DirectMessage[] {
+  const byId = new Map(messages.map((item) => [item.id, item]));
+  const added: DirectMessage[] = [];
+  for (const message of incoming) {
+    const existing = byId.get(message.id);
+    if (existing === undefined) {
+      byId.set(message.id, message);
+      added.push(message);
+    } else if (existing.conversationId !== message.conversationId || existing.senderId !== message.senderId ||
+        existing.body !== message.body || existing.createdAt !== message.createdAt ||
+        existing.deliveredAt !== message.deliveredAt || existing.readAt !== message.readAt) {
+      throw new DirectMessagesError('invalid-response');
+    }
+  }
+  if (added.length === 0) return messages;
+  return [...messages, ...added].sort((left, right) => {
+    const order = compareDirectPositions(left, right);
+    if (order === null) throw new DirectMessagesError('invalid-response');
+    return order;
+  });
+}
+// A send confirmed while a first-page read was in flight can be newer than that
+// read's snapshot. Messages are never deleted, so it is kept instead of vanishing.
+function keepNewerKnownMessages(fresh: DirectMessage[], known: DirectMessage[]): DirectMessage[] {
+  const newest = fresh[0];
+  if (newest === undefined) return mergeMessages(fresh, known);
+  return mergeMessages(fresh, known.filter((message) => (compareDirectPositions(message, newest) ?? 1) < 0));
+}

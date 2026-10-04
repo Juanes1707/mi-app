@@ -17,7 +17,7 @@ import {
 import { BackendPostCommentRemoteGateway } from '@/features/offline-sync/data/backend-post-comment-remote-gateway';
 import { BackendPostLikeRemoteGateway } from '@/features/offline-sync/data/backend-post-like-remote-gateway';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
-import { expoUuidGenerator } from '@/features/offline-sync/infrastructure/expo-uuid-generator';
+import { expoUuidGenerator } from '@/shared/infrastructure/expo-uuid-generator';
 import {
   OFFLINE_MUTATIONS_DATABASE_NAME, prepareOfflineMutationDatabase,
 } from '@/features/offline-sync/infrastructure/offline-mutation-database';
