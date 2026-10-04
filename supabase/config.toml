@@ -45,3 +45,9 @@ verify_jwt = true
 
 [functions.direct-messages]
 verify_jwt = true
+
+[functions.direct-message]
+verify_jwt = true
+
+[functions.direct-message-receipts]
+verify_jwt = true

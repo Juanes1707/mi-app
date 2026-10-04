@@ -1,8 +1,11 @@
 import { withSupabase } from 'npm:@supabase/server@1';
 
 import {
-  compareDescendingPosition, hasExactFields, isNullableTimestamp, isRecord,
-  isSameUuid, isTimestamp, isUuid, isValidMessageBody, isValidReceiptOrder, parseLimit,
+  MESSAGE_ROW_FIELDS as ROW_FIELDS, onlyNullMessageData as onlyNullData,
+  parseDirectMessageRow as parseMessageRow, type DirectMessageDto as Message,
+} from '../_shared/direct-message-row.ts';
+import {
+  compareDescendingPosition, hasExactFields, isRecord, isTimestamp, isUuid, isValidMessageBody, parseLimit,
 } from '../_shared/direct-message-values.ts';
 
 type MessageCursor = { createdAt: string; messageId: string };
@@ -12,16 +15,9 @@ type ListValidation =
 type SendValidation =
   | { ok: true; conversationId: string; messageId: string; body: string }
   | { ok: false; response: Response };
-type Message = {
-  id: string; conversationId: string; senderId: string; body: string; createdAt: string;
-  deliveredAt: string | null; readAt: string | null;
-};
 
 const SEND_FIELDS = new Set(['conversationId', 'messageId', 'body']);
 const QUERY_FIELDS = new Set(['conversationId', 'limit', 'beforeCreatedAt', 'beforeMessageId']);
-const ROW_FIELDS = new Set([
-  'status', 'message_id', 'conversation_id', 'sender_id', 'body', 'created_at', 'delivered_at', 'read_at',
-]);
 const SEND_STATUSES = new Set([
   'created', 'already_created', 'invalid_request', 'profile_not_ready',
   'conversation_not_found', 'message_id_conflict',
@@ -91,22 +87,6 @@ function validateList(request: Request): ListValidation {
   return {
     ok: true, conversationId: conversationIds[0].toLowerCase(), limit,
     cursor: { createdAt: times[0], messageId: ids[0].toLowerCase() },
-  };
-}
-
-function onlyNullData(row: Record<string, unknown>): boolean {
-  return [...ROW_FIELDS].every((field) => field === 'status' || row[field] === null);
-}
-
-function parseMessageRow(row: Record<string, unknown>, expectedConversationId: string): Message | null {
-  if (!isUuid(row.message_id) || !isSameUuid(row.conversation_id, expectedConversationId) ||
-      !isUuid(row.sender_id) || !isValidMessageBody(row.body) || !isTimestamp(row.created_at) ||
-      !isNullableTimestamp(row.delivered_at) || !isNullableTimestamp(row.read_at) ||
-      !isValidReceiptOrder(row.delivered_at, row.read_at)) return null;
-  return {
-    id: row.message_id.toLowerCase(), conversationId: row.conversation_id.toLowerCase(),
-    senderId: row.sender_id.toLowerCase(), body: row.body, createdAt: row.created_at,
-    deliveredAt: row.delivered_at, readAt: row.read_at,
   };
 }
 

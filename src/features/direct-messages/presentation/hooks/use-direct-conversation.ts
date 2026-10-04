@@ -159,6 +159,23 @@ export function useDirectConversation(ownerUserId: string, conversationId: strin
     publishDraft(value);
   }, [publishDraft, publishPending]);
 
+  // A canonical message read after a Realtime hint, merged into the LATEST state like
+  // any page item (duplicates are no-ops). During the first load it joins the empty
+  // page and survives that load (keepNewerKnownMessages); a not-found chat takes none.
+  const mergeLiveMessage = useCallback((message: DirectMessage) => {
+    if (!mountedRef.current) return;
+    const latest = stateRef.current;
+    if (latest.ownerUserId !== ownerUserId || latest.conversationId !== conversationId ||
+        message.conversationId !== conversationId || latest.status === 'not-found') return;
+    let messages: DirectMessage[];
+    try {
+      messages = mergeMessage(latest.page.messages, message);
+    } catch {
+      return;
+    }
+    if (messages !== latest.page.messages) publish({ ...latest, page: { ...latest.page, messages } });
+  }, [ownerUserId, conversationId, publish]);
+
   useEffect(() => {
     mountedRef.current = true;
     const next = initial(ownerUserId, conversationId);
@@ -170,7 +187,7 @@ export function useDirectConversation(ownerUserId: string, conversationId: strin
   return {
     state: state.ownerUserId === ownerUserId && state.conversationId === conversationId
       ? state : initial(ownerUserId, conversationId),
-    draft: draft.text, setDraft, pendingSend, send, retrySend, discardFailedSend,
+    draft: draft.text, setDraft, pendingSend, send, retrySend, discardFailedSend, mergeLiveMessage,
     refresh: loadFirst, retry: loadFirst,
     onEndReached: useCallback(() => { void loadMore(); }, [loadMore]),
     retryLoadMore: useCallback(() => { void loadMore(true); }, [loadMore]),
@@ -184,27 +201,50 @@ function initial(ownerUserId: string, conversationId: string): ConversationState
 export function mergeMessage(messages: DirectMessage[], message: DirectMessage): DirectMessage[] {
   return mergeMessages(messages, [message]);
 }
-// Same id must mean the same message: an incompatible copy is never overwritten.
+// Same id must mean the same message: identity, body and createdAt never change, and
+// an incompatible copy is rejected, never overwritten. Receipt timestamps are the one
+// exception: they only ever go from null to a value (never rewritten server-side),
+// so a newer canonical copy may fill them.
 export function mergeMessages(messages: DirectMessage[], incoming: DirectMessage[]): DirectMessage[] {
   const byId = new Map(messages.map((item) => [item.id, item]));
-  const added: DirectMessage[] = [];
+  let changed = false;
   for (const message of incoming) {
     const existing = byId.get(message.id);
     if (existing === undefined) {
       byId.set(message.id, message);
-      added.push(message);
-    } else if (existing.conversationId !== message.conversationId || existing.senderId !== message.senderId ||
-        existing.body !== message.body || existing.createdAt !== message.createdAt ||
-        existing.deliveredAt !== message.deliveredAt || existing.readAt !== message.readAt) {
-      throw new DirectMessagesError('invalid-response');
+      changed = true;
+      continue;
+    }
+    const merged = withAdvancedReceipts(existing, message);
+    if (merged !== existing) {
+      byId.set(message.id, merged);
+      changed = true;
     }
   }
-  if (added.length === 0) return messages;
-  return [...messages, ...added].sort((left, right) => {
+  if (!changed) return messages;
+  return [...byId.values()].sort((left, right) => {
     const order = compareDirectPositions(left, right);
     if (order === null) throw new DirectMessagesError('invalid-response');
     return order;
   });
+}
+function withAdvancedReceipts(existing: DirectMessage, incoming: DirectMessage): DirectMessage {
+  if (existing.conversationId !== incoming.conversationId || existing.senderId !== incoming.senderId ||
+      existing.body !== incoming.body || !sameInstant(existing.createdAt, incoming.createdAt)) {
+    throw new DirectMessagesError('invalid-response');
+  }
+  const deliveredAt = advancedReceipt(existing.deliveredAt, incoming.deliveredAt);
+  const readAt = advancedReceipt(existing.readAt, incoming.readAt);
+  return deliveredAt === existing.deliveredAt && readAt === existing.readAt
+    ? existing : { ...existing, deliveredAt, readAt };
+}
+function advancedReceipt(current: string | null, incoming: string | null): string | null {
+  if (current === null) return incoming;
+  if (incoming === null || sameInstant(current, incoming)) return current;
+  throw new DirectMessagesError('invalid-response');
+}
+function sameInstant(left: string, right: string): boolean {
+  return left === right || compareDirectPositions({ createdAt: left, id: '' }, { createdAt: right, id: '' }) === 0;
 }
 // A send confirmed while a first-page read was in flight can be newer than that
 // read's snapshot. Messages are never deleted, so it is kept instead of vanishing.

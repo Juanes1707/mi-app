@@ -1,6 +1,6 @@
 import type {
   DirectConversation, DirectConversationSummary, DirectInboxCursor, DirectInboxPage,
-  DirectMessage, DirectMessagesCursor, DirectMessagesPage,
+  DirectMessage, DirectMessageReceipt, DirectMessageReceiptKind, DirectMessagesCursor, DirectMessagesPage,
 } from '@/features/direct-messages/domain/direct-message';
 import {
   compareDirectPositions, isDirectTimestamp, isValidDirectMessageBody,
@@ -17,6 +17,7 @@ const MESSAGE_RESPONSE_FIELDS = ['messages', 'nextCursor'];
 const MESSAGE_FIELDS = ['id', 'conversationId', 'senderId', 'body', 'createdAt', 'deliveredAt', 'readAt'];
 const INBOX_CURSOR_FIELDS = ['lastMessageAt', 'conversationId'];
 const MESSAGE_CURSOR_FIELDS = ['createdAt', 'messageId'];
+const RECEIPT_FIELDS = ['conversationId', 'messageSenderId', 'throughMessageId', 'throughCreatedAt', 'kind', 'at', 'updatedCount'];
 const USERNAME_PATTERN = /^[A-Za-z0-9._]{3,30}$/;
 
 export function parseDirectConversation(value: unknown, recipientUserId: string): DirectConversation | null {
@@ -95,6 +96,38 @@ export function parseSentDirectMessage(value: unknown, expected: {
   const message = parseMessage(value.message, expected.conversationId);
   return message !== null && message.id === expected.messageId &&
     message.senderId === expected.senderId && message.body === expected.body ? message : null;
+}
+
+// GET /direct-message: the same message parser as the history page, and it must be
+// exactly the message that was asked for.
+export function parseDirectMessageResponse(value: unknown, expected: {
+  conversationId: string; messageId: string;
+}): DirectMessage | null {
+  if (!hasExactFields(value, ['message'])) return null;
+  const message = parseMessage(value.message, expected.conversationId);
+  return message !== null && message.id === expected.messageId ? message : null;
+}
+
+// POST /direct-message-receipts: echoes the request; the marked messages belong to
+// the peer (never the owner); a timestamp exactly when something changed.
+export function parseDirectMessageReceipt(value: unknown, expected: {
+  ownerUserId: string; conversationId: string; throughMessageId: string; kind: DirectMessageReceiptKind;
+}): DirectMessageReceipt | null {
+  if (!hasExactFields(value, ['receipt']) || !hasExactFields(value.receipt, RECEIPT_FIELDS)) return null;
+  const receipt = value.receipt;
+  const conversationId = normalizeDirectUuid(receipt.conversationId);
+  const messageSenderId = normalizeDirectUuid(receipt.messageSenderId);
+  const throughMessageId = normalizeDirectUuid(receipt.throughMessageId);
+  const { at, updatedCount, throughCreatedAt } = receipt;
+  if (conversationId !== expected.conversationId || throughMessageId !== expected.throughMessageId ||
+      messageSenderId === null || messageSenderId === expected.ownerUserId || receipt.kind !== expected.kind ||
+      !isDirectTimestamp(throughCreatedAt) || typeof updatedCount !== 'number' ||
+      !Number.isSafeInteger(updatedCount) || updatedCount < 0) return null;
+  if (updatedCount === 0 ? at !== null : !isDirectTimestamp(at)) return null;
+  return {
+    conversationId, messageSenderId, throughMessageId, throughCreatedAt, kind: expected.kind,
+    at: updatedCount === 0 ? null : at as string, updatedCount,
+  };
 }
 
 function parseSummary(value: unknown, ownerUserId: string): DirectConversationSummary | null {

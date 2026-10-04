@@ -1,6 +1,6 @@
 import type {
-  DirectConversation, DirectInboxCursor, DirectInboxPage, DirectMessage,
-  DirectMessagesCursor, DirectMessagesPage,
+  DirectConversation, DirectInboxCursor, DirectInboxPage, DirectMessage, DirectMessageReceipt,
+  DirectMessageReceiptKind, DirectMessagesCursor, DirectMessagesPage,
 } from '@/features/direct-messages/domain/direct-message';
 import { DirectMessagesError } from '@/features/direct-messages/domain/direct-messages-error';
 import type { DirectMessagesRepository } from '@/features/direct-messages/domain/direct-messages-repository';
@@ -59,6 +59,31 @@ export class SendDirectMessage {
       throw new DirectMessagesError('invalid-request');
     }
     return this.repository.sendMessage(owner, conversation, message, body);
+  }
+}
+// The canonical message behind a Realtime hint, through the owner-bound HTTP read.
+export class GetDirectMessage {
+  constructor(private readonly repository: DirectMessagesRepository) {}
+  execute(ownerUserId: string, conversationId: string, messageId: string): Promise<DirectMessage> {
+    const owner = normalizeDirectUuid(ownerUserId);
+    const conversation = normalizeDirectUuid(conversationId);
+    const message = normalizeDirectUuid(messageId);
+    if (owner === null || conversation === null || message === null) throw new DirectMessagesError('invalid-request');
+    return this.repository.getMessage(owner, conversation, message);
+  }
+}
+export class MarkDirectMessageReceipt {
+  constructor(private readonly repository: DirectMessagesRepository) {}
+  execute(
+    ownerUserId: string, conversationId: string, throughMessageId: string, kind: DirectMessageReceiptKind,
+  ): Promise<DirectMessageReceipt> {
+    const owner = normalizeDirectUuid(ownerUserId);
+    const conversation = normalizeDirectUuid(conversationId);
+    const through = normalizeDirectUuid(throughMessageId);
+    if (owner === null || conversation === null || through === null || (kind !== 'delivered' && kind !== 'read')) {
+      throw new DirectMessagesError('invalid-request');
+    }
+    return this.repository.markReceipt(owner, conversation, through, kind);
   }
 }
 function validLimit(value: number): boolean {

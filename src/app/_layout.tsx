@@ -10,6 +10,7 @@ import {
 import { useAuth } from '@/features/auth/presentation/hooks/use-auth';
 import { AuthProvider } from '@/features/auth/presentation/providers/auth-provider';
 import { AuthEntryScreen } from '@/features/auth/presentation/screens/auth-entry-screen';
+import { DirectMessageRealtimeHost } from '@/features/direct-messages/presentation/direct-message-realtime-host';
 import { OfflineSyncCoordinatorHost } from '@/features/offline-sync/presentation/offline-sync-coordinator-host';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -45,6 +46,7 @@ export default function RootLayout() {
   return (
     <AuthProvider {...authProviderDependencies}>
       <OfflineSyncCoordinatorHost />
+      <DirectMessageRealtimeHost />
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AnimatedSplashOverlay />
         <AuthenticatedContent />

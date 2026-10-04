@@ -52,7 +52,7 @@ function AuthenticatedInbox({ ownerUserId }: { ownerUserId: string }) {
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
         onRefresh={refresh}
-        refreshing={state.operation === 'refreshing'}
+        refreshing={state.operation === 'refreshing' && !state.silent}
       />
     </SafeAreaView>
   );

@@ -1,9 +1,10 @@
 import {
-  parseDirectConversation, parseDirectInboxPage, parseDirectMessagesPage, parseSentDirectMessage,
+  parseDirectConversation, parseDirectInboxPage, parseDirectMessageReceipt, parseDirectMessageResponse,
+  parseDirectMessagesPage, parseSentDirectMessage,
 } from '@/features/direct-messages/data/direct-messages-response';
 import type {
-  DirectConversation, DirectInboxCursor, DirectInboxPage, DirectMessage,
-  DirectMessagesCursor, DirectMessagesPage,
+  DirectConversation, DirectInboxCursor, DirectInboxPage, DirectMessage, DirectMessageReceipt,
+  DirectMessageReceiptKind, DirectMessagesCursor, DirectMessagesPage,
 } from '@/features/direct-messages/domain/direct-message';
 import { DirectMessagesError } from '@/features/direct-messages/domain/direct-messages-error';
 import type { DirectMessagesRepository } from '@/features/direct-messages/domain/direct-messages-repository';
@@ -12,7 +13,7 @@ import {
 } from '@/infrastructure/api/authenticated-backend-api-client';
 import { BackendApiError } from '@/infrastructure/api/backend-api-client';
 
-type Endpoint = 'conversation' | 'inbox' | 'messages' | 'send';
+type Endpoint = 'conversation' | 'inbox' | 'messages' | 'message' | 'send' | 'receipt';
 
 export class BackendDirectMessagesRepository implements DirectMessagesRepository {
   constructor(private readonly client: AuthenticatedBackendApiClient) {}
@@ -57,6 +58,17 @@ export class BackendDirectMessagesRepository implements DirectMessagesRepository
     return page;
   }
 
+  // The authorized read behind a Realtime hint: the hint never carries content.
+  async getMessage(owner: string, conversationId: string, messageId: string): Promise<DirectMessage> {
+    const params = new URLSearchParams({ conversationId, messageId });
+    let response: unknown;
+    try { response = await this.client.getAsUser<unknown>(owner, `/direct-message?${params}`); }
+    catch (error: unknown) { throw mapError(error, 'message'); }
+    const message = parseDirectMessageResponse(response, { conversationId, messageId });
+    if (message === null) throw new DirectMessagesError('invalid-response');
+    return message;
+  }
+
   async sendMessage(owner: string, conversationId: string, messageId: string, body: string): Promise<DirectMessage> {
     let response: unknown;
     try {
@@ -70,6 +82,20 @@ export class BackendDirectMessagesRepository implements DirectMessagesRepository
     if (message === null) throw new DirectMessagesError('invalid-response');
     return message;
   }
+
+  async markReceipt(
+    owner: string, conversationId: string, throughMessageId: string, kind: DirectMessageReceiptKind,
+  ): Promise<DirectMessageReceipt> {
+    let response: unknown;
+    try {
+      response = await this.client.postAsUser<unknown, {
+        conversationId: string; throughMessageId: string; kind: DirectMessageReceiptKind;
+      }>(owner, '/direct-message-receipts', { conversationId, throughMessageId, kind });
+    } catch (error: unknown) { throw mapError(error, 'receipt'); }
+    const receipt = parseDirectMessageReceipt(response, { ownerUserId: owner, conversationId, throughMessageId, kind });
+    if (receipt === null) throw new DirectMessagesError('invalid-response');
+    return receipt;
+  }
 }
 
 function mapError(error: unknown, endpoint: Endpoint): DirectMessagesError {
@@ -81,13 +107,18 @@ function mapError(error: unknown, endpoint: Endpoint): DirectMessagesError {
   if (error.status === 401) return new DirectMessagesError('authentication-required');
   if (error.status === 400 && (
     error.backendCode === 'invalid_direct_conversation_request' ||
-    error.backendCode === 'invalid_direct_message_request'
+    error.backendCode === 'invalid_direct_message_request' ||
+    error.backendCode === 'invalid_direct_message_receipt_request'
   )) return new DirectMessagesError('invalid-request');
   if (endpoint === 'conversation' && error.status === 404 && error.backendCode === 'recipient_not_found') {
     return new DirectMessagesError('recipient-not-found');
   }
-  if ((endpoint === 'messages' || endpoint === 'send') && error.status === 404 &&
-      error.backendCode === 'conversation_not_found') return new DirectMessagesError('conversation-not-found');
+  if ((endpoint === 'messages' || endpoint === 'message' || endpoint === 'send' || endpoint === 'receipt') &&
+      error.status === 404 && error.backendCode === 'conversation_not_found') {
+    return new DirectMessagesError('conversation-not-found');
+  }
+  if ((endpoint === 'message' || endpoint === 'receipt') && error.status === 404 &&
+      error.backendCode === 'direct_message_not_found') return new DirectMessagesError('message-not-found');
   if (error.status === 409 && error.backendCode === 'profile_not_ready') {
     return new DirectMessagesError('profile-not-ready');
   }

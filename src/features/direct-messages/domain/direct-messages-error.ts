@@ -1,6 +1,6 @@
 export type DirectMessagesErrorCode =
   | 'invalid-request' | 'authentication-required' | 'owner-session-mismatch'
-  | 'recipient-not-found' | 'conversation-not-found' | 'profile-not-ready'
+  | 'recipient-not-found' | 'conversation-not-found' | 'message-not-found' | 'profile-not-ready'
   | 'message-conflict' | 'invalid-response' | 'unavailable';
 
 export class DirectMessagesError extends Error {
