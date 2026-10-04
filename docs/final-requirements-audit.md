@@ -2,7 +2,7 @@
 
 Audit date: 2026-10-04
 
-Audited baseline: `cce0cbbf36d77d19aad8b2c3082fbdc2aa3ec80c` (`Harden Android integration and performance`)
+Audited baseline: `12391bf8c4e00ade8b40ed6d033e177d8edb18be` (`Finalize project audit and defense guide`)
 
 Academic source: `Parcial Desarrollo Movil - Proyecto 3_ Red Social Estilo Instagram V2.pdf` (3 pages)
 
@@ -36,7 +36,7 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 | Public Profiles | PASS | profile search/view repositories, screens and Edge functions | Search and profile view models support public profiles. | ✅ Source inspection | Hosted profiles were not exercised. |
 | Private Profiles and relationship state | PASS | `get_profile_view`, profile view screen, follow flow | Private flag and relationship (`none`, `request_pending`, `following`) are returned through Edge. | ✅ Source/SQL inspection | Hosted privacy path was not exercised. |
 | Followers/following graph | PASS | `follows`, `follow_requests`, follow RPCs | Accepted relationships live in `follows`; pending requests remain separate. | ✅ SQL inspection | No hosted multi-user run. |
-| Followers/following list UI and authorized list read | FAIL | No list route, repository, Edge endpoint or RPC is present | Global search found relationship flow only; the PDF explicitly mentions access to the followers/following list. | ❌ Gap confirmed | This final audit was forbidden from adding a new feature. |
+| Followers/following list UI and authorized list read | PASS — simulated/local | `profile-connections/**`, two root routes, Edge Function and two list RPCs | 48 Edge + 42 Mobile assertions covered strict contracts, privacy-safe outcomes, pagination, owner mismatch and async races; SQL authorization/grants were inspected. | 🧪 Local harness/static SQL | Hosted multi-user PostgreSQL/Edge and native Android UI were unavailable. |
 | Formal private follow request | PASS | follow request use cases/Edge/RPC | Private target creates one pending request; it does not create a `follows` row. | ✅ Source/SQL inspection | Hosted A/B run was not exercised. |
 | Approve follow request | PASS | Activity accept action and `respond_follow_request` RPC | Accept transitions the request and inserts the actual follow relation atomically. | ✅ Source/SQL inspection | Hosted A/B run was not exercised. |
 | Reject follow request | PASS | Activity reject action and `respond_follow_request` RPC | Reject transitions request state without creating a follow. | ✅ Source/SQL inspection | Hosted A/B run was not exercised. |
@@ -106,10 +106,25 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 | Expo application configuration | PASS | `app.json`, `package.json` | `expo-router`, `expo-image-picker`, `expo-splash-screen` and `expo-sqlite` plugins are tracked; Router is the entry point; `typedRoutes` and React Compiler are enabled. | ✅ Config inspection | Native generation/runtime remains separately qualified. |
 | Android package identifier persisted | BLOCKED — environment | `app.json` has no `android.package` | No tracked project metadata proves `com.juanes1706.miapp` is the intended permanent identity. | ⚠️ Decision blocked | Android package identifier must be chosen/persisted before final native release build. |
 | Supported Android JDK/SDK native build | BLOCKED — environment | Expo config/prebuild path exists | Environment has Java 25 but no Android SDK/ADB; Gradle compatibility was not established. | ⚠️ Not executable | Use an Expo-supported JDK/Gradle combination and build natively. |
-| TypeScript | PASS | entire tracked TypeScript project | `npx tsc --noEmit` exited 0 after the account-switch fix. | ✅ Executed command | None. |
+| TypeScript | PASS | entire tracked TypeScript project | `npx tsc --noEmit` exited 0 after the profile-connections implementation and typed-route generation. | ✅ Executed command | None. |
 | Repository hygiene | PASS | tracked/working tree audit | No generated `android/`, exports, APK/AAB, logs, env secrets or scratch harness are tracked. | ✅ Git inspection | `.expo/` and dependencies remain ignored local files. |
 
-## Confirmed defect corrected in this audit
+## Matrix totals
+
+| Status | Count |
+|---|---:|
+| PASS | 69 |
+| PASS — simulated/local | 12 |
+| BLOCKED — environment | 6 |
+| FAIL | 0 |
+
+## Confirmed defects corrected across the final audits
+
+### Authorized follower/following lists were absent
+
+- **Gap:** the accepted social graph existed, but there was no authorized page read, Edge endpoint, Mobile repository or navigable list.
+- **Fix:** two service-role RPCs authorize the target and keyset-page one joined profile summary page; one JWT-authenticated Edge request invokes one RPC; an owner-bound Mobile feature exposes `/followers/[userId]` and `/following/[userId]` through both Profile screens.
+- **Tests:** 48 Edge and 42 Mobile assertions passed. SQL structure/grants passed 17 static assertions. A real PostgreSQL execution and native Android interaction remain blocked by the environment.
 
 ### Authenticated route state survived an account change
 
@@ -160,7 +175,11 @@ Stories use private media, backend visibility, exact timestamp-based 24-hour exp
 
 ## Validation record
 
-- ✅ `npx tsc --noEmit`: passed after the production fix.
+- ✅ `npx tsc --noEmit`: passed after the follower/following implementation.
+- 🧪 Profile connections Edge harness: **48/48** assertions (strict query, followers/following direction, empty/pagination, 401/404/409/500, malformed rows, order/cursor, one RPC and zero RPC before rejected requests).
+- 🧪 Profile connections Mobile harness: **42/42** assertions (strict response parsing, owner A/token B with zero HTTP, loading/error/retry/refresh/pagination, duplicate load guard, late owner/target response and unmount safety, routes/Profile integration).
+- 🧪 Expo Router typed routes regenerated with `CI=1 npx expo start --offline`; Metro was stopped and port 8081 was free afterward.
+- ⚠️ A temporary real PostgreSQL run was not executable: this environment has no `psql`, PostgreSQL server, Docker or Supabase CLI. SQL privacy, direction, keyset, grants and RLS boundaries were inspected statically without claiming a database execution.
 - 🧪 `npx expo export --platform android --output-dir <system-temp>`: passed in this audit (2,020 modules, Hermes `.hbc` bundle). This is not an APK or native Gradle build.
 - 🧪 Focused local regression: **16/16** (RAM LRU, private cache authorization, dedupe, revoke purge, Story timing/pause/stale completion/gestures/ring, DM receipt coalescing/read implication, authenticated Stack key, production mock isolation).
 - 🧪 Implementation 53: Expo Android prebuild and Hermes export completed; both schemes appeared in generated Android configuration. This is not an APK or device run.
@@ -170,4 +189,4 @@ Stories use private media, backend visibility, exact timestamp-based 24-hour exp
 
 ## Final assessment
 
-The architecture and all implemented flows are internally consistent after the account-switch correction. One academic requirement remains a confirmed functional gap: an authorized followers/following list. Since adding that feature was explicitly prohibited during this final audit, the honest code-completeness result is **NOT CODE COMPLETE**. Runtime validation also remains partial because Android and hosted Supabase prerequisites are absent.
+All requirements in the academic matrix now have an implementation. The authorized followers/following list closes the only confirmed functional gap with privacy-safe SQL, a one-RPC Edge boundary, owner-bound Mobile access and navigable list UI. The final result is **CODE COMPLETE — RUNTIME VALIDATION PARTIALLY BLOCKED** because Android and hosted Supabase prerequisites remain absent.

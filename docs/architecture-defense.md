@@ -65,6 +65,14 @@ The persistent tab bar has Home, Explore, Activity and Profile. Each tab owns a 
 
 The authenticated Stack is keyed by `user.id`. Account A's entire route subtree therefore unmounts before account B receives fresh screens. Long-lived background hosts stay outside that Stack because they need to observe auth/connectivity globally; they bind every operation to an owner and reject mismatched token subjects. Feature hooks also use mounted flags, generations and exact route/owner keys to ignore late callbacks.
 
+## Followers and following lists
+
+The read model reuses `public.follows.created_at`. `list_profile_followers` joins rows where the member is `follower_id`; `list_profile_following` joins rows where the member is `followed_id`. Both page by `(created_at DESC, counterpart UUID DESC)`, so a timestamp tie is deterministic and no `OFFSET` is needed.
+
+Before returning members, each RPC allows the target only when it is self, public, or currently followed by the JWT actor. Pending, rejected or historical requests and inverse follows do not grant access. A hidden private target and a missing target both become `profile_not_found`. Once the list itself is authorized, one JOIN returns minimal member summaries in one RPC; it does not perform per-row authorization or HTTP requests.
+
+Mobile keeps the path `Screen → hook/controller → use case → repository → AuthenticatedBackendApiClient → Edge → RPC`. The repository uses `getAsUser`, validates exact keys/order/cursor and rejects an owner/token mismatch before HTTP. Route/owner identity and controller generations discard late pages after refresh, target change, account change or unmount.
+
 ## Stories
 
 The backend owns activity and visibility. A Story is active while `created_at > current_timestamp - interval '24 hours'`; exactly 24 hours is expired. The client does not mutate an `expired` flag.
@@ -98,6 +106,5 @@ The correct defense is not “everything runs in one thread.” JavaScript coord
 
 ## Known delivery limitations
 
-- Followers/following list UI and authorized list endpoint are absent although the relationship graph exists.
 - `android.package` is not persisted because no source proves the permanent native identity. It must be chosen before a reproducible release build.
 - Android native behavior, frame/memory metrics and hosted Supabase/WebSocket integration still need their external environments.

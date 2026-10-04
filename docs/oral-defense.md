@@ -192,14 +192,30 @@ The UI keeps canonical state already fetched. Realtime reconnect/focus triggers 
 
 There is no Android SDK/ADB/device, hosted Supabase configuration, deployed Realtime session or FPS/memory trace. Therefore native deep links, share sheet, ImagePicker `content://`, gestures/onDisplay, WebSockets, `gfxinfo` and `meminfo` remain unvalidated.
 
-### 46. ¿Cuál es el gap funcional confirmado por la auditoría final?
+### 46. ¿Cómo se protege la lista de seguidores de un perfil privado?
 
-The follow graph and request/approve/reject flow exist, but no route, repository, Edge endpoint or RPC lists followers/following. The PDF explicitly mentions authorized access to that list, so the final matrix marks it `FAIL`.
+`list_profile_followers` y `list_profile_following` autorizan primero al target: permiten self, perfil público o un `follows(actor,target)` actual. Edge obtiene actor del JWT y los casos privado oculto e inexistente producen el mismo `profile_not_found`.
 
-### 47. ¿Por qué no se persistió `com.juanes1706.miapp`?
+### 47. ¿Por qué una solicitud pendiente no permite ver esas listas?
+
+La autorización consulta exclusivamente la relación aceptada actual en `public.follows`. `follow_requests` conserva pending/rejected/history, pero ninguna de esas filas se usa como permiso; tampoco autoriza que el target siga al actor en dirección inversa.
+
+### 48. ¿Cómo diferenciamos followers de following en SQL?
+
+Followers(X) fija `followed_id = X` y devuelve el perfil de `follower_id`. Following(X) fija `follower_id = X` y devuelve el perfil de `followed_id`. Dos RPCs explícitas hacen visible esa diferencia y evitan invertir la relación accidentalmente.
+
+### 49. ¿Por qué estas listas usan keyset y no OFFSET?
+
+Cada página continúa después de `(created_at, counterpart UUID)` en orden descendente. El UUID desempata relaciones con el mismo timestamp, evita duplicados/omisiones al recorrer páginas y no obliga a PostgreSQL a saltar un número creciente de filas.
+
+### 50. ¿Por qué no hacemos una petición Profile por cada fila?
+
+Una vez autorizada la lista del target, una sola RPC une `follows` con `profiles` y devuelve los resúmenes mínimos de toda la página. Así se evita N+1; cada perfil conserva sus propias reglas cuando el usuario toca una fila.
+
+### 51. ¿Por qué no se persistió `com.juanes1706.miapp`?
 
 It was only a value selected during a temporary prebuild. No tracked metadata proves it is the intended permanent identity. Inventing a package could break signing/submission continuity, so the owner must choose and persist it before a release build.
 
-### 48. ¿Por qué no afirmamos compatibilidad con Java 25?
+### 52. ¿Por qué no afirmamos compatibilidad con Java 25?
 
 No Android SDK or Gradle build exists in this environment. A temporary prebuild/export does not compile native Gradle, so the final native build must use the JDK supported by the generated Expo toolchain and prove it with Gradle.

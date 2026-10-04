@@ -60,3 +60,6 @@ verify_jwt = true
 
 [functions.story-media]
 verify_jwt = true
+
+[functions.profile-connections]
+verify_jwt = true

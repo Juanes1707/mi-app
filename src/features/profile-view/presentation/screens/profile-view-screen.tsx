@@ -15,6 +15,7 @@ import { useAuth } from '@/features/auth/presentation/hooks/use-auth';
 import { getOrCreateDirectConversation } from '@/features/direct-messages/direct-messages-container';
 import { FollowError, type FollowErrorCode } from '@/features/follow/domain/errors/follow-error';
 import { requestFollow } from '@/features/follow/follow-container';
+import { ProfileConnectionsLinks } from '@/features/profile-connections/presentation/components/profile-connections-links';
 import type { ViewedProfile } from '@/features/profile-view/domain/entities/viewed-profile';
 import {
   ProfileViewError,
@@ -338,6 +339,10 @@ export function ProfileViewScreen({ profileId }: ProfileViewScreenProps) {
             />
             <Text style={[styles.privacyText, { color: theme.text }]}>{privacyLabel}</Text>
           </View>
+
+          {profile.isSelf || !profile.isPrivate || profile.relationship.status === 'following'
+            ? <ProfileConnectionsLinks userId={profile.id} />
+            : null}
 
           <RelationshipControl
             isFollowing={isFollowing}

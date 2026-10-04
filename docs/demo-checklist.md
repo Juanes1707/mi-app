@@ -47,7 +47,8 @@
 - As B, find private A in Explore and request follow.
 - As A, open Activity and reject one request; repeat and approve.
 - Show that a pending request does not expose private content and acceptance creates the `follows` relationship.
-- State the known gap clearly: the project does not implement followers/following list screens/endpoints.
+- From A's own Profile, open **Seguidores** and **Seguidos**; from B's selected authorized Profile, open both lists and tap a row to reuse the existing Profile screen.
+- As outsider C, confirm the private-list affordance is hidden; a manual deep route must show the same **Perfil no disponible.** result used for a missing profile.
 
 ### 5:15–5:55 — 7. Share / deep link
 
@@ -108,8 +109,10 @@
 - [ ] Configure the public backend base URL locally.
 - [ ] Apply every tracked migration in order.
 - [ ] Deploy all required Edge Functions.
+- [ ] Deploy `profile-connections` and apply both follower/following list RPCs.
 - [ ] Create test users A, B and C without using real passwords in tracked files.
 - [ ] Make A private, B requester/follower and C outsider.
+- [ ] Verify A/self, public target and B/current follower can page both lists; pending-only, inverse-follow and C/outsider cannot.
 - [ ] Confirm `post-media` and `story-media` buckets are private with expected MIME/size limits.
 - [ ] Confirm service-role secrets exist only in server-side project secrets.
 - [ ] Enable/configure Realtime private Broadcast authorization.

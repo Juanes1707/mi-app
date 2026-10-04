@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { ProfileConnectionsLinks } from '@/features/profile-connections/presentation/components/profile-connections-links';
 import type { Profile } from '@/features/profile/domain/entities/profile';
 import { ProfileError, type ProfileErrorCode } from '@/features/profile/domain/errors/profile-error';
 import { getMyProfile } from '@/features/profile/profile-container';
@@ -160,6 +161,8 @@ function ProfileContent({ profile, onEdit }: { profile: Profile; onEdit: () => v
             />
             <Text style={[styles.privacyText, { color: theme.text }]}>{privacyLabel}</Text>
           </View>
+
+          <ProfileConnectionsLinks userId={profile.id} />
         </View>
       </ScrollView>
     </SafeAreaView>
