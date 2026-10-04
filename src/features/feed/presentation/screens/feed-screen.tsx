@@ -1,7 +1,7 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, Text, View,
+  ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, View,
   type ListRenderItem, type ViewabilityConfig, type ViewToken,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import { useFeed } from '@/features/feed/presentation/hooks/use-feed';
 import { useOptimisticPostLikes } from '@/features/feed/presentation/hooks/use-optimistic-post-likes';
 import { collectVisiblePostIds } from '@/features/feed/presentation/visible-post-ids';
 import { usePostMediaMemoryPressure } from '@/features/post-media/presentation/hooks/use-post-media-memory-pressure';
+import { sharePostReference } from '@/features/post-sharing/application/share-post-reference';
 import { useTheme } from '@/hooks/use-theme';
 
 const messages: Record<FeedErrorCode, string> = {
@@ -99,6 +100,14 @@ export function FeedScreen() {
   const openComments = useCallback((postId: string) => {
     router.push({ pathname: '/home/comments/[postId]', params: { postId } });
   }, [router]);
+  const openPost = useCallback((postId: string) => {
+    router.push({ pathname: '/post/[postId]', params: { postId } });
+  }, [router]);
+  const sharePost = useCallback((postId: string) => {
+    void sharePostReference(postId).catch(() => {
+      Alert.alert('No pudimos compartir', 'Inténtalo de nuevo.');
+    });
+  }, []);
   usePostMediaMemoryPressure();
   const [visiblePostIds, setVisiblePostIds] = useState(NO_VISIBLE_POSTS);
   // FlatList does not support changing this callback on the fly: keep one identity.
@@ -126,10 +135,13 @@ export function FeedScreen() {
         onToggleLike={toggleLike}
         onOpenAuthor={openAuthor}
         onOpenComments={openComments}
+        onOpenPost={openPost}
+        onSharePost={sharePost}
       />
     );
   }, [
-    openAuthor, openComments, visiblePostIds, getDisplayedLike, isLikeEnabled, failedPostIds, toggleLike,
+    openAuthor, openComments, openPost, sharePost, visiblePostIds, getDisplayedLike,
+    isLikeEnabled, failedPostIds, toggleLike,
   ]);
   const listExtraData = useMemo(
     () => ({ visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled }),

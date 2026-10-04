@@ -21,10 +21,13 @@ type PostCardProps = {
   onToggleLike: (post: FeedPost) => void;
   onOpenAuthor: (profileId: string) => void;
   onOpenComments: (postId: string) => void;
+  onOpenPost?: (postId: string) => void;
+  onSharePost: (postId: string) => void;
 };
 
 const HEART_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 const COMMENTS_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
+const ACTION_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
 function commentsAccessibilityLabel(count: number): string {
   if (count === 0) return 'Ver comentarios';
@@ -33,7 +36,7 @@ function commentsAccessibilityLabel(count: number): string {
 
 export const PostCard = memo(function PostCard({
   post, isMediaVisible, isLiked, likesCount, isLikeEnabled, likeSaveFailed, onToggleLike, onOpenAuthor,
-  onOpenComments,
+  onOpenComments, onOpenPost, onSharePost,
 }: PostCardProps) {
   const theme = useTheme();
   const username = post.author.username?.trim();
@@ -90,16 +93,36 @@ export const PostCard = memo(function PostCard({
             No pudimos guardar tu acción.
           </Text>
         ) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={commentsAccessibilityLabel(post.commentsCount)}
-          hitSlop={COMMENTS_HIT_SLOP}
-          onPress={() => onOpenComments(post.id)}
-          style={({ pressed }) => [styles.commentsButton, pressed ? styles.pressed : undefined]}>
-          <Text style={[styles.body, { color: theme.textSecondary }]}>
-            {post.commentsCount.toLocaleString('es-CO')} comentarios
-          </Text>
-        </Pressable>
+        <View style={styles.actions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={commentsAccessibilityLabel(post.commentsCount)}
+            hitSlop={COMMENTS_HIT_SLOP}
+            onPress={() => onOpenComments(post.id)}
+            style={({ pressed }) => [styles.actionButton, pressed ? styles.pressed : undefined]}>
+            <Text style={[styles.body, { color: theme.textSecondary }]}>
+              Ver comentarios · {post.commentsCount.toLocaleString('es-CO')}
+            </Text>
+          </Pressable>
+          {onOpenPost ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Ver publicación"
+              hitSlop={ACTION_HIT_SLOP}
+              onPress={() => onOpenPost(post.id)}
+              style={({ pressed }) => [styles.actionButton, pressed ? styles.pressed : undefined]}>
+              <Text style={[styles.body, { color: theme.textSecondary }]}>Ver publicación</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Compartir publicación"
+            hitSlop={ACTION_HIT_SLOP}
+            onPress={() => onSharePost(post.id)}
+            style={({ pressed }) => [styles.actionButton, pressed ? styles.pressed : undefined]}>
+            <Text style={[styles.body, { color: theme.textSecondary }]}>Compartir</Text>
+          </Pressable>
+        </View>
         {post.caption !== '' ? (
           <Text style={[styles.body, { color: theme.text }]}>
             <Text style={styles.captionName}>{username || name}</Text> {post.caption}
@@ -129,7 +152,8 @@ const styles = StyleSheet.create({
   likeDisabled: { opacity: 0.45 },
   liked: { color: '#D92545' },
   body: { fontSize: 14, lineHeight: 20 },
-  commentsButton: { alignSelf: 'flex-start' },
+  actions: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  actionButton: { justifyContent: 'center', minHeight: 44 },
   captionName: { fontWeight: '700' },
   date: { fontSize: 12, lineHeight: 18 },
   pressed: { opacity: 0.7 },

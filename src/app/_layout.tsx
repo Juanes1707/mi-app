@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, Slot, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { ActivityIndicator, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
@@ -32,7 +32,12 @@ function AuthenticatedContent() {
     return <AuthEntryScreen {...authEntryScreenDependencies} />;
   }
 
-  return <Slot />;
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="(tabs)" />
+    </Stack>
+  );
 }
 
 export default function RootLayout() {

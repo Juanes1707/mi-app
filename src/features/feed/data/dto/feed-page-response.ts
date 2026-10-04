@@ -1,38 +1,53 @@
+export type FeedPostResponseDto = {
+  id: string;
+  author: { id: string; username: string | null; displayName: string | null };
+  imagePath: string;
+  caption: string;
+  createdAt: string;
+  likesCount: number;
+  commentsCount: number;
+  isLiked: boolean;
+};
+
 export type FeedPageResponseDto = {
-  posts: {
-    id: string;
-    author: { id: string; username: string | null; displayName: string | null };
-    imagePath: string;
-    caption: string;
-    createdAt: string;
-    likesCount: number;
-    commentsCount: number;
-    isLiked: boolean;
-  }[];
+  posts: FeedPostResponseDto[];
   nextCursor: { createdAt: string; postId: string } | null;
 };
 
+const POST_FIELDS = new Set([
+  'id', 'author', 'imagePath', 'caption', 'createdAt', 'likesCount', 'commentsCount', 'isLiked',
+]);
+const AUTHOR_FIELDS = new Set(['id', 'username', 'displayName']);
+const PAGE_FIELDS = new Set(['posts', 'nextCursor']);
+const CURSOR_FIELDS = new Set(['createdAt', 'postId']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function isFeedPageResponseDto(value: unknown): value is FeedPageResponseDto {
-  if (!isRecord(value) || !Array.isArray(value.posts)) return false;
+  if (!isRecord(value) || !hasExactFields(value, PAGE_FIELDS) || !Array.isArray(value.posts)) return false;
   const cursor = value.nextCursor;
   if (cursor !== null && (
-    !isRecord(cursor) || !isIsoTimestamp(cursor.createdAt) || !isNonEmptyString(cursor.postId)
+    !isRecord(cursor) || !hasExactFields(cursor, CURSOR_FIELDS) ||
+    !isIsoTimestamp(cursor.createdAt) || !isUuid(cursor.postId)
   )) return false;
 
-  return value.posts.every((post: unknown) =>
-    isRecord(post) &&
-    isNonEmptyString(post.id) &&
-    isRecord(post.author) &&
-    isNonEmptyString(post.author.id) &&
-    isNullableString(post.author.username) &&
-    isNullableString(post.author.displayName) &&
-    isNonEmptyString(post.imagePath) &&
-    typeof post.caption === 'string' &&
-    isIsoTimestamp(post.createdAt) &&
-    isCount(post.likesCount) &&
-    isCount(post.commentsCount) &&
-    typeof post.isLiked === 'boolean',
-  );
+  return value.posts.every(isFeedPostResponseDto);
+}
+
+export function isFeedPostResponseDto(value: unknown): value is FeedPostResponseDto {
+  if (!isRecord(value) || !hasExactFields(value, POST_FIELDS)) return false;
+  const author = value.author;
+
+  return isUuid(value.id) &&
+    isRecord(author) && hasExactFields(author, AUTHOR_FIELDS) &&
+    isUuid(author.id) &&
+    isNullableString(author.username) &&
+    isNullableString(author.displayName) &&
+    isNonEmptyString(value.imagePath) && value.imagePath.trim() === value.imagePath &&
+    typeof value.caption === 'string' &&
+    isIsoTimestamp(value.createdAt) &&
+    isCount(value.likesCount) &&
+    isCount(value.commentsCount) &&
+    typeof value.isLiked === 'boolean';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,6 +55,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '';
+}
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+function hasExactFields(value: Record<string, unknown>, fields: Set<string>): boolean {
+  const keys = Object.keys(value);
+  return keys.length === fields.size && keys.every((key) => fields.has(key));
 }
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
