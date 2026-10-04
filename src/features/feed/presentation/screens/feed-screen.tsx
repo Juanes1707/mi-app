@@ -173,23 +173,14 @@ export function FeedScreen() {
     [visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled],
   );
 
-  if (state.status === 'initial-loading') {
-    return (
-      <SafeAreaView style={[styles.centered, { backgroundColor: theme.background }]}>
-        <ActivityIndicator color={theme.text} size="large" />
-        <Feedback message="Cargando publicaciones..." />
-        <CreatePostButton />
-      </SafeAreaView>
-    );
-  }
-  if (state.status === 'initial-error') {
-    return (
-      <SafeAreaView style={[styles.centered, { backgroundColor: theme.background }]}>
-        <Feedback message={messages[state.error?.code ?? 'unavailable']} onRetry={retryInitial} />
-        <CreatePostButton />
-      </SafeAreaView>
-    );
-  }
+  const initialFeedStatus = state.status === 'initial-loading' ? (
+    <View style={styles.feedback}>
+      <ActivityIndicator color={theme.text} size="large" />
+      <Text style={[styles.statusText, { color: theme.textSecondary }]}>Cargando publicaciones...</Text>
+    </View>
+  ) : state.status === 'initial-error' ? (
+    <Feedback message={messages[state.error?.code ?? 'unavailable']} onRetry={retryInitial} />
+  ) : null;
 
   return (
     <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: theme.background }]}>
@@ -216,6 +207,7 @@ export function FeedScreen() {
               onRetryPublication={storyPublication.retry}
               onDiscardPublication={storyPublication.discard}
             />
+            {initialFeedStatus}
             {state.refreshError ? (
               <Feedback message={messages[state.refreshError.code]} onRetry={refresh} />
             ) : null}
@@ -228,7 +220,7 @@ export function FeedScreen() {
           </>
         }
         ListEmptyComponent={
-          state.page.nextCursor === null
+          state.status === 'ready' && state.page.nextCursor === null
             ? <Feedback message="Aún no hay publicaciones para mostrar." />
             : null
         }
@@ -270,7 +262,6 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13, lineHeight: 18 },
   headerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 6 },
   separator: { height: 8 },
-  centered: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: 24 },
   feedback: { alignItems: 'center', gap: 12, padding: 20 },
   statusText: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
   retry: { borderRadius: 10, minHeight: 44, justifyContent: 'center', paddingHorizontal: 24 },
