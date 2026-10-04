@@ -7,7 +7,12 @@ import type { DirectMessage, DirectMessagesPage } from '@/features/direct-messag
 import { DirectMessagesError } from '@/features/direct-messages/domain/direct-messages-error';
 import { compareDirectPositions, isValidDirectMessageBody } from '@/features/direct-messages/domain/direct-message-values';
 
-type PendingSend = { messageId: string; body: string; status: 'sending' | 'error' };
+// draftRevision: the composer revision this intention was created from (see Draft).
+type PendingSend = { messageId: string; body: string; draftRevision: number; status: 'sending' | 'error' };
+// The text alone is no identity: a NEW draft can spell exactly what was just sent.
+// Every write gets a revision from a counter that never goes back, not even on a
+// scope change, so a revision identifies one composer state for the hook's lifetime.
+type Draft = { text: string; revision: number };
 type ConversationState = {
   ownerUserId: string; conversationId: string;
   status: 'loading' | 'ready' | 'error' | 'not-found';
@@ -23,9 +28,11 @@ const normalizeError = (value: unknown) => value instanceof DirectMessagesError
 
 export function useDirectConversation(ownerUserId: string, conversationId: string) {
   const [state, setState] = useState<ConversationState>(() => initial(ownerUserId, conversationId));
-  const [draft, setDraftState] = useState('');
+  const [draft, setDraftState] = useState<Draft>({ text: '', revision: 0 });
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null);
   const stateRef = useRef(state);
+  const draftRef = useRef(draft);
+  const draftRevisionRef = useRef(0);
   const pendingRef = useRef(pendingSend);
   const mountedRef = useRef(false);
   const generationRef = useRef(0);
@@ -33,6 +40,11 @@ export function useDirectConversation(ownerUserId: string, conversationId: strin
   scopeRef.current = `${ownerUserId}:${conversationId}`;
   const publish = useCallback((next: ConversationState) => { stateRef.current = next; setState(next); }, []);
   const publishPending = useCallback((next: PendingSend | null) => { pendingRef.current = next; setPendingSend(next); }, []);
+  const publishDraft = useCallback((text: string) => {
+    draftRevisionRef.current += 1;
+    const next = { text, revision: draftRevisionRef.current };
+    draftRef.current = next; setDraftState(next);
+  }, []);
   const current = useCallback((generation: number) => mountedRef.current &&
     generationRef.current === generation && stateRef.current.ownerUserId === ownerUserId &&
     stateRef.current.conversationId === conversationId, [ownerUserId, conversationId]);
@@ -108,8 +120,10 @@ export function useDirectConversation(ownerUserId: string, conversationId: strin
         publish({ ...previous, page: { ...previous.page, messages: mergeMessage(previous.page.messages, message) } });
       }
       publishPending(null);
-      // Only the text that was sent is cleared; anything typed meanwhile stays.
-      setDraftState((value) => value === intention.body ? '' : value);
+      // Cleared only if the composer is still the very revision that was sent: any
+      // edit made meanwhile stays, even one that ends in the same text.
+      const latestDraft = draftRef.current;
+      if (latestDraft.revision === intention.draftRevision && latestDraft.text === intention.body) publishDraft('');
     } catch (error: unknown) {
       if (!currentScope() || pendingRef.current?.messageId !== intention.messageId) return;
       const normalized = normalizeError(error);
@@ -120,13 +134,17 @@ export function useDirectConversation(ownerUserId: string, conversationId: strin
       }
       publishPending({ ...intention, status: 'error' });
     }
-  }, [ownerUserId, conversationId, currentScope, publish, publishPending]);
+  }, [ownerUserId, conversationId, currentScope, publish, publishPending, publishDraft]);
 
   const send = useCallback(() => {
-    if (pendingRef.current !== null || !isValidDirectMessageBody(draft)) return;
-    const intention: PendingSend = { messageId: createDirectMessageId.execute(), body: draft, status: 'error' };
+    // Text and revision are read together from the ref: the intention is one composer state.
+    const composer = draftRef.current;
+    if (pendingRef.current !== null || !isValidDirectMessageBody(composer.text)) return;
+    const intention: PendingSend = {
+      messageId: createDirectMessageId.execute(), body: composer.text, draftRevision: composer.revision, status: 'error',
+    };
     void attemptSend(intention);
-  }, [draft, attemptSend]);
+  }, [attemptSend]);
   const retrySend = useCallback(() => {
     const intention = pendingRef.current;
     if (intention?.status === 'error') void attemptSend(intention);
@@ -134,23 +152,25 @@ export function useDirectConversation(ownerUserId: string, conversationId: strin
   const discardFailedSend = useCallback(() => {
     if (pendingRef.current?.status === 'error') publishPending(null);
   }, [publishPending]);
+  // Every onChangeText is a user edit (Android does not emit identical replacements),
+  // so each call is a new revision, even when it ends in a previously sent text.
   const setDraft = useCallback((value: string) => {
     if (pendingRef.current?.status === 'error' && value !== pendingRef.current.body) publishPending(null);
-    setDraftState(value);
-  }, [publishPending]);
+    publishDraft(value);
+  }, [publishDraft, publishPending]);
 
   useEffect(() => {
     mountedRef.current = true;
     const next = initial(ownerUserId, conversationId);
-    stateRef.current = next; setState(next); pendingRef.current = null; setPendingSend(null); setDraftState('');
+    stateRef.current = next; setState(next); pendingRef.current = null; setPendingSend(null); publishDraft('');
     void loadFirst();
     return () => { mountedRef.current = false; generationRef.current += 1; stateRef.current.operation = 'idle'; };
-  }, [ownerUserId, conversationId, loadFirst]);
+  }, [ownerUserId, conversationId, loadFirst, publishDraft]);
 
   return {
     state: state.ownerUserId === ownerUserId && state.conversationId === conversationId
       ? state : initial(ownerUserId, conversationId),
-    draft, setDraft, pendingSend, send, retrySend, discardFailedSend,
+    draft: draft.text, setDraft, pendingSend, send, retrySend, discardFailedSend,
     refresh: loadFirst, retry: loadFirst,
     onEndReached: useCallback(() => { void loadMore(); }, [loadMore]),
     retryLoadMore: useCallback(() => { void loadMore(true); }, [loadMore]),
