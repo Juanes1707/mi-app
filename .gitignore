@@ -46,3 +46,7 @@ example
 # generated native folders
 /ios
 /android
+
+.env.seed.local
+scripts/demo-fixtures/*.local.json
+scripts/demo-fixtures/tmp/
