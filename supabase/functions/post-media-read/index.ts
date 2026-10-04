@@ -1,5 +1,7 @@
 import { withSupabase } from 'npm:@supabase/server@1';
 
+import { parseSignedUrl } from '../_shared/storage-capabilities.ts';
+
 type PostImageExtension = 'jpg' | 'png' | 'webp';
 
 type PostMediaReadValidation =
@@ -173,36 +175,6 @@ function hasReadableMetadata(
     value.size <= MAX_FILE_SIZE_BYTES &&
     value.contentType === expectedContentType
   );
-}
-
-// Storage builds the capability from the authorized imagePath; we only check
-// the shape we consume, not Storage's internal URL layout.
-function parseSignedUrl(value: unknown): string | null {
-  if (
-    !isRecord(value) ||
-    typeof value.signedUrl !== 'string' ||
-    value.signedUrl.trim() === ''
-  ) {
-    return null;
-  }
-
-  let signedUrl: URL;
-
-  try {
-    signedUrl = new URL(value.signedUrl);
-  } catch {
-    return null;
-  }
-
-  if (
-    (signedUrl.protocol !== 'https:' && signedUrl.protocol !== 'http:') ||
-    signedUrl.username !== '' ||
-    signedUrl.password !== ''
-  ) {
-    return null;
-  }
-
-  return value.signedUrl;
 }
 
 export default {

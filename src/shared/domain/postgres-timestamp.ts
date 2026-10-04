@@ -41,6 +41,20 @@ export function parsePostgresTimestamp(value: unknown): PostgresTimestamp | null
   return { epochMilliseconds, subMillisecondMicroseconds: Number(fraction.slice(3, 6)) };
 }
 
+// Total order of two instants (negative when left is earlier), to the microsecond.
+export function comparePostgresTimestamps(left: PostgresTimestamp, right: PostgresTimestamp): number {
+  if (left.epochMilliseconds !== right.epochMilliseconds) {
+    return left.epochMilliseconds < right.epochMilliseconds ? -1 : 1;
+  }
+  return left.subMillisecondMicroseconds - right.subMillisecondMicroseconds;
+}
+
+// Exact microseconds from `from` to `to` (integer arithmetic, no Date rounding).
+export function microsecondsBetween(from: PostgresTimestamp, to: PostgresTimestamp): number {
+  return (to.epochMilliseconds - from.epochMilliseconds) * 1000 +
+    (to.subMillisecondMicroseconds - from.subMillisecondMicroseconds);
+}
+
 function daysInMonth(year: number, month: number): number {
   if (month === 2) {
     const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);

@@ -51,3 +51,12 @@ verify_jwt = true
 
 [functions.direct-message-receipts]
 verify_jwt = true
+
+[functions.stories]
+verify_jwt = true
+
+[functions.story-trays]
+verify_jwt = true
+
+[functions.story-media]
+verify_jwt = true

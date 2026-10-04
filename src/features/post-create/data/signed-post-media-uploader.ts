@@ -4,7 +4,7 @@ import { validatePostMedia } from '@/features/post-create/application/post-creat
 import type { LocalPostImage, PostMediaUploadTicket } from '@/features/post-create/domain/models';
 import type { LocalPostImageInspector, PostMediaUploader } from '@/features/post-create/domain/ports';
 import { PostCreateError } from '@/features/post-create/domain/post-create-error';
-import { supabase } from '@/infrastructure/supabase/supabase-client';
+import { readLocalFileBytes, uploadWithSignedCapability } from '@/shared/infrastructure/signed-storage-upload';
 
 // The only Storage exception: upload bytes using a backend-issued, object-scoped capability.
 export class SignedPostMediaUploader implements PostMediaUploader, LocalPostImageInspector {
@@ -30,20 +30,13 @@ export class SignedPostMediaUploader implements PostMediaUploader, LocalPostImag
     try {
       const current = this.inspect(image.uri, image.contentType);
       if (current.fileSize !== image.fileSize) throw new PostCreateError('invalid-image');
-      bytes = await new File(image.uri).arrayBuffer();
-      if (bytes.byteLength !== current.fileSize) throw new PostCreateError('invalid-image');
+      const read = await readLocalFileBytes(image.uri, current.fileSize);
+      if (read === null) throw new PostCreateError('invalid-image');
+      bytes = read;
     } catch (error: unknown) {
       throw error instanceof PostCreateError ? error : new PostCreateError('invalid-image');
     }
-    try {
-      const { data, error } = await supabase.storage.from(ticket.bucket).uploadToSignedUrl(
-        ticket.path, ticket.token, bytes, { contentType: image.contentType },
-      );
-      if (error !== null || !data || data.path !== ticket.path ||
-        data.fullPath !== `${ticket.bucket}/${ticket.path}`) {
-        throw new PostCreateError('upload-unavailable');
-      }
-    } catch {
+    if (!(await uploadWithSignedCapability(ticket, bytes, image.contentType))) {
       throw new PostCreateError('upload-unavailable');
     }
   }
