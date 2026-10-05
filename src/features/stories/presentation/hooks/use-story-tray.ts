@@ -34,10 +34,19 @@ export function useStoryTray(ownerUserId: string | null) {
   const refresh = useCallback(() => { void controller?.refresh(); }, [controller]);
   const loadMore = useCallback(() => { void controller?.loadMore(); }, [controller]);
   const retryLoadMore = useCallback(() => { void controller?.loadMore(true); }, [controller]);
-  const isFullySeen = useCallback((tray: StoryTray) => {
-    void seenVersion;
-    return ownerUserId !== null && storySeenTracker.isTrayFullySeen(ownerUserId, tray);
-  }, [ownerUserId, seenVersion]);
+  // The version must be a real input of the callback: React Compiler infers
+  // dependencies from what the closure uses and would drop a bare `void seenVersion`,
+  // freezing the rings until the tray data itself changed (e.g. after a reload the
+  // persisted "seen" state loaded but the rings stayed coloured).
+  const isFullySeen = useCallback(
+    (tray: StoryTray) => isTrayFullySeenAt(seenVersion, ownerUserId, tray),
+    [ownerUserId, seenVersion],
+  );
 
   return { state, refresh, loadMore, retryLoadMore, isFullySeen };
+}
+
+// `_version` ties a ring evaluation to the seen-state version it was computed for.
+function isTrayFullySeenAt(_version: number, ownerUserId: string | null, tray: StoryTray): boolean {
+  return ownerUserId !== null && storySeenTracker.isTrayFullySeen(ownerUserId, tray);
 }

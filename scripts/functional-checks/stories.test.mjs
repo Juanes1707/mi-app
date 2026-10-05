@@ -184,3 +184,23 @@ test('"seen" is persisted locally and survives closing the app', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The app is built with React Compiler, which infers memo dependencies from what a
+// closure really uses. The ring callback must be rebuilt when the seen-state version
+// changes, or rings stay coloured after the persisted state loads (reload bug).
+test('React Compiler rebuilds the ring callback when the seen state changes', async () => {
+  const { createRequire } = await import('node:module');
+  const { readFileSync } = await import('node:fs');
+  const requireFromApp = createRequire(path.join(root, 'package.json'));
+  const babel = requireFromApp('@babel/core');
+  const file = path.join(root, 'src/features/stories/presentation/hooks/use-story-tray.ts');
+  const { code } = babel.transformSync(readFileSync(file, 'utf8'), {
+    filename: file, babelrc: false, configFile: false,
+    presets: [[requireFromApp.resolve('@babel/preset-typescript'), { allExtensions: true }]],
+    plugins: [[requireFromApp.resolve('babel-plugin-react-compiler'), {}]],
+  });
+  const assignment = code.indexOf('const isFullySeen = ');
+  assert.ok(assignment > 0);
+  const guard = code.slice(code.lastIndexOf('if ($[', assignment), assignment);
+  assert.match(guard, /!== seenVersion/, 'the memoized ring callback ignores seenVersion');
+});
