@@ -9,8 +9,8 @@ import { useTheme } from '@/hooks/use-theme';
 
 const STATUS_LABELS: Record<LocalCommentStatus, string> = {
   saving: 'Guardando…',
-  // Durable on the device. Also shown while sync is blocked (offline, server error,
-  // conflict): the intention is kept and retried by later sync events.
+  // Durable on the device. Also shown while sync is blocked (offline, server error):
+  // the intention is kept and retried with backoff or by later sync events.
   pending: 'Pendiente',
   // Left the queue without a known outcome yet: never claimed as sent.
   resolving: 'Pendiente',

@@ -102,7 +102,12 @@ function mapFailure(error: unknown): CreatePostCommentRemoteResult {
         return { kind: 'profile-not-ready' };
       }
       if (error.status === 409 && error.backendCode === 'comment_creation_conflict') {
-        throw new RemoteMutationError('comment-conflict');
+        return { kind: 'conflict' };
+      }
+      // Only the function's own 400 proves the payload will never be accepted; any
+      // other 400 (proxy, gateway) stays a technical failure and keeps the entry.
+      if (error.status === 400 && error.backendCode === 'invalid_post_comment_request') {
+        return { kind: 'rejected' };
       }
       if (error.status === 401) throw new RemoteMutationError('authentication-required');
       if (error.status === 400) throw new RemoteMutationError('invalid-request');

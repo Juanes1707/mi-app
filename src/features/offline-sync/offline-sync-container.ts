@@ -3,6 +3,9 @@ import { openDatabaseAsync } from 'expo-sqlite';
 import { AppState } from 'react-native';
 
 import { authProviderDependencies } from '@/features/auth/auth-container';
+import {
+  runBackgroundOfflineSync, type OfflineSyncBackgroundScheduler,
+} from '@/features/offline-sync/application/offline-sync-background';
 import { OfflineSyncCoordinator } from '@/features/offline-sync/application/offline-sync-coordinator';
 import { OfflineMutationProcessor } from '@/features/offline-sync/application/offline-mutation-processor';
 import { OfflineMutationResolutionSignal } from '@/features/offline-sync/application/offline-mutation-resolution-signal';
@@ -17,6 +20,9 @@ import {
 import { BackendPostCommentRemoteGateway } from '@/features/offline-sync/data/backend-post-comment-remote-gateway';
 import { BackendPostLikeRemoteGateway } from '@/features/offline-sync/data/backend-post-like-remote-gateway';
 import type { OfflineMutationQueue } from '@/features/offline-sync/domain/offline-mutation-queue';
+import {
+  defineOfflineSyncBackgroundTask, ExpoOfflineSyncBackgroundScheduler,
+} from '@/features/offline-sync/infrastructure/expo-offline-sync-background-task';
 import { expoUuidGenerator } from '@/shared/infrastructure/expo-uuid-generator';
 import {
   OFFLINE_MUTATIONS_DATABASE_NAME, prepareOfflineMutationDatabase,
@@ -65,6 +71,12 @@ export const offlineSyncCoordinator = new OfflineSyncCoordinator(
   },
   offlineSyncOrchestrator,
 );
+
+// Module scope on purpose: the OS may start the task with no screen mounted. It
+// drains through the same orchestrator, so foreground and background share one FIFO.
+defineOfflineSyncBackgroundTask(() => runBackgroundOfflineSync(offlineSyncOrchestrator));
+export const offlineSyncBackgroundScheduler: OfflineSyncBackgroundScheduler =
+  new ExpoOfflineSyncBackgroundScheduler();
 
 export const queueSetPostLike = new QueueSetPostLike(offlineMutationQueue);
 export const getPendingPostLikeProjection = new GetPendingPostLikeProjection(offlineMutationQueue);

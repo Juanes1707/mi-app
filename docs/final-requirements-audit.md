@@ -54,11 +54,12 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 | 60 FPS long Feed | BLOCKED — environment | Architecture is prepared but no metric exists | No Android SDK, ADB, emulator or physical device; no `gfxinfo` trace. | ⚠️ Not executable | 60 FPS must not be claimed. |
 | Optimistic Like update | PASS | `use-optimistic-post-likes.ts` | Visible state changes immediately and overlays canonical feed state. | ✅ Source inspection | Gesture latency was not measured. |
 | Durable Like projection/queue | PASS | SQLite offline schema/queue | Owner, post and desired state are stored durably. | ✅ Source/SQL inspection | Device process-death scenario was not exercised. |
-| FIFO Like replay after reconnect | PASS | processor/coordinator/orchestrator | A single serial drain peeks the smallest sequence and triggers on connectivity/foreground events. | ✅ Source inspection | Real radio reconnect was not exercised. |
+| FIFO Like replay after reconnect | PASS — simulated/local | processor/coordinator/orchestrator | A single serial drain peeks the smallest sequence and triggers on connectivity/foreground events; transient failures are retried with capped exponential backoff while the app is in use and online. | 🧪 `offline-sync-queue.test.mjs` (real SQLite file) | Real radio reconnect was not exercised. |
+| Background queue processing | PASS — simulated/local | `offline-sync-background.ts`, `expo-offline-sync-background-task.ts`, `index.ts` | While signed in, an `expo-background-task` task drains through the same orchestrator with the app in background; it is defined before Expo Router so a headless OS start finds it. | 🧪 Local harness (task body) + Android Hermes export | Expo Go reports background tasks as restricted; OS scheduling needs a development build. |
 | Like canonical reconciliation | PASS | resolution signal and optimistic overlay | Terminal server result removes the queue row and reconciles visible state. | ✅ Source inspection | Hosted canonical response was not exercised. |
 | Optimistic Comment with client UUID | PASS | comment composer/use cases/overlay | UUID exists before enqueue and is reused by the remote command. | ✅ Source inspection | Native interaction was not exercised. |
 | Durable Comment queue and retry | PASS | SQLite queue, processor, comment gateway | Comment body/parent/client ID persist; retry replays the same ID. | ✅ Source inspection | Process death/restart was not exercised. |
-| Comment terminal outcomes and reconciliation | PASS | mutation resolution types/signals | Success, idempotent replay, conflict and blocking outcomes are distinguished. | ✅ Source inspection | Hosted conflict path was not exercised. |
+| Comment terminal outcomes and reconciliation | PASS — simulated/local | mutation resolution types/signals | Success, idempotent replay, not-found, contractual rejection and UUID conflict are terminal; only transient failures block the queue. | 🧪 `offline-sync-queue.test.mjs` | Hosted conflict path was not exercised. |
 | Offline queue owner scope | PASS | every SQLite query plus owner-bound gateways | Rows are queried/deleted by owner; `getAsUser`/`postAsUser` verifies JWT subject before sending. | ✅ Source inspection | A/B device session run was not exercised. |
 | 1:1 direct conversations | PASS | DM routes, repository, Edge Functions, SQL | Inbox, conversation history and send flows are present. | ✅ Source/SQL inspection | Hosted chat was not exercised. |
 | Canonical participant pair A/B == B/A | PASS | direct conversation SQL constraints/RPC | Participants are ordered and unique; either direction resolves the same row. | ✅ SQL inspection | Hosted concurrent creation was not exercised. |
@@ -113,8 +114,8 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 
 | Status | Count |
 |---|---:|
-| PASS | 69 |
-| PASS — simulated/local | 12 |
+| PASS | 67 |
+| PASS — simulated/local | 15 |
 | BLOCKED — environment | 6 |
 | FAIL | 0 |
 
@@ -163,7 +164,7 @@ The Feed uses `FlatList` virtualization and keyset paging. Private images use on
 
 ## Offline summary
 
-Likes and Comments update optimistic projections immediately, persist commands in one owner-scoped SQLite queue, replay strictly by global sequence, and reconcile only after a terminal canonical outcome. Owner JWT mismatch stops the drain before A can be sent as B. Exact retries are idempotent. DMs deliberately do not use the offline mutation queue. Story seen state uses a separate owner-scoped SQLite database and is a local UX fact.
+Likes and Comments update optimistic projections immediately, persist commands in one owner-scoped SQLite queue, replay strictly by global sequence, and reconcile only after a terminal canonical outcome. Transient failures are retried with capped exponential backoff while the app is in use; commands the backend authoritatively refuses become terminal instead of blocking the queue; an `expo-background-task` task drains the same queue in background (development build). Owner JWT mismatch stops the drain before A can be sent as B. Exact retries are idempotent. DMs deliberately do not use the offline mutation queue. Story seen state uses a separate owner-scoped SQLite database and is a local UX fact.
 
 ## Realtime summary
 
@@ -186,6 +187,7 @@ Stories use private media, backend visibility, exact timestamp-based 24-hour exp
 - ⚠️ The historical `h36` source/result is not tracked in this checkout, so the prompt's historical `163/163` baseline was not represented as a current run.
 - ⚠️ `h40` remains a non-authoritative stale historical harness and was not used to change production.
 - ⚠️ Physical Android, native Gradle build, hosted Supabase, real WebSockets, `gfxinfo` and `meminfo` were unavailable.
+- 🧪 Offline queue follow-up: `scripts/functional-checks/offline-sync-queue.test.mjs` **9/9** over a real SQLite file (restart durability, strict FIFO across kinds, backoff after a failed reconnection, no timers offline/background, lost-response idempotency, terminal not-found/rejected/conflict without blocking, corrupt row stop, owner isolation, background task drain); 10/10 targeted mutations detected; `npx tsc --noEmit` and Android Hermes export passed.
 
 ## Final assessment
 

@@ -10,10 +10,15 @@ export type CreatedPostComment = {
 // Outcomes the backend can authoritatively report for one create-comment command.
 // `confirmed` covers both the first creation and an exact idempotent replay.
 // `post-not-found` deliberately covers "deleted" and "no longer visible" alike.
+// `rejected`: the contractual 400; the backend will never accept this payload.
+// `conflict`: the comment UUID already exists with another payload or author. The
+// backend keeps that row untouched, so this command can never be applied.
 export type CreatePostCommentRemoteResult =
   | { kind: 'confirmed'; comment: CreatedPostComment }
   | { kind: 'post-not-found' }
   | { kind: 'parent-not-found' }
+  | { kind: 'rejected' }
+  | { kind: 'conflict' }
   | { kind: 'profile-not-ready' };
 
 export type CreatePostCommentRemoteInput = {

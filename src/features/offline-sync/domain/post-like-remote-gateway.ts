@@ -1,8 +1,10 @@
 // Outcomes the backend can authoritatively report for one set-like command.
 // `not-found` deliberately covers "deleted" and "no longer visible" alike.
+// `rejected`: the contractual 400; the backend will never accept this command.
 export type SetPostLikeRemoteResult =
   | { kind: 'updated'; postId: string; liked: boolean; likesCount: number }
   | { kind: 'not-found'; postId: string }
+  | { kind: 'rejected'; postId: string }
   | { kind: 'profile-not-ready' };
 
 export type SetPostLikeRemoteInput = {

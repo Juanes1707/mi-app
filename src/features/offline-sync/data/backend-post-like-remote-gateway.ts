@@ -43,6 +43,11 @@ function mapFailure(error: unknown, postId: string): SetPostLikeRemoteResult {
     if (error.status === 409 && error.backendCode === 'profile_not_ready') {
       return { kind: 'profile-not-ready' };
     }
+    // Only the function's own 400 proves the command will never be accepted; any
+    // other 400 (proxy, gateway) stays a technical failure and keeps the entry.
+    if (error.status === 400 && error.backendCode === 'invalid_post_like_request') {
+      return { kind: 'rejected', postId };
+    }
     if (error.status === 401) throw new RemoteMutationError('authentication-required');
     if (error.code === 'invalid-json') throw new RemoteMutationError('invalid-response');
     if (error.status === 400) throw new RemoteMutationError('invalid-request');

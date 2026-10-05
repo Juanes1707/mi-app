@@ -7,13 +7,14 @@ import type { PendingPostComment } from '@/features/offline-sync/domain/post-com
 //   is not success (a terminal 404 also removes the row), so it is NOT shown as sent.
 // - sent: the processor reported it CONFIRMED (201/200) and removed it, but no loaded
 //   server page contains it yet (pages are createdAt ASC), so it stays visible.
-// - terminal: the processor finished it with a terminal post/parent not-found and
-//   removed it. Not retried; the user can only discard the local copy.
+// - terminal: the processor finished it with a terminal outcome (post/parent not
+//   found, rejected by the backend, UUID conflict) and removed it. Not retried; the
+//   user can only discard the local copy.
 // - save-error: SQLite did not store it. Not durable; the text is kept for retry/discard.
 export type LocalCommentStatus = 'saving' | 'pending' | 'resolving' | 'sent' | 'terminal' | 'save-error';
 
 // How the processor finished a comment that left the queue (see CompletedOfflineMutation).
-export type CommentResolution = 'confirmed' | 'post-not-found' | 'parent-not-found';
+export type CommentResolution = 'confirmed' | 'post-not-found' | 'parent-not-found' | 'rejected' | 'conflict';
 
 // One comment intention of the signed-in user, shown over the server tree. It never
 // enters the server tree's branch ids or cursors: it is a projection, not data.
@@ -87,9 +88,8 @@ export function markLocalDurable(
 // What a comment that left the queue becomes. Without evidence it stays 'resolving'
 // (shown as pending): only a CONFIRMED resolution may say "sent".
 function afterLeavingQueue(resolution: CommentResolution | null): LocalCommentStatus {
-  if (resolution === 'confirmed') return 'sent';
-  if (resolution === 'post-not-found' || resolution === 'parent-not-found') return 'terminal';
-  return 'resolving';
+  if (resolution === null) return 'resolving';
+  return resolution === 'confirmed' ? 'sent' : 'terminal';
 }
 
 export function markLocalSaveError(entries: readonly LocalComment[], commentId: string) {

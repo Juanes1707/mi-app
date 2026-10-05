@@ -40,11 +40,11 @@ The like overlay changes the visible boolean/count immediately, so perceived lat
 
 ### 9. ¿Qué pasa si el Like se hace sin conexión?
 
-The desired state and owner are inserted into the SQLite mutation queue. The optimistic projection remains visible. Connectivity/foreground events trigger a FIFO drain; `putAsUser` verifies the current JWT still belongs to that owner before sending.
+The desired state and owner are inserted into the SQLite mutation queue. The optimistic projection remains visible. Connectivity/foreground events trigger a FIFO drain; `putAsUser` verifies the current JWT still belongs to that owner before sending. If the first attempt after reconnecting fails, `OfflineSyncCoordinator` retries with exponential backoff (2 s to 60 s) while the app is in use and online. With the app in background, the `expo-background-task` task (WorkManager on Android) runs the same drain when the OS allows it.
 
 ### 10. ¿Por qué la offline queue es FIFO?
 
-One autoincrement sequence covers Likes and Comments. Processing oldest-first preserves user intent and prevents a reply from overtaking the comment it references. A transient head failure blocks later commands rather than silently reordering history.
+One autoincrement sequence covers Likes and Comments. Processing oldest-first preserves user intent and prevents a reply from overtaking the comment it references. A transient head failure blocks later commands rather than silently reordering history. A command the backend will never accept (not found, contractual 400, UUID conflict) finishes with that terminal outcome, so one refused command cannot block later actions; the backend rules already kept the remote data intact.
 
 ### 11. ¿Por qué un Comment tiene UUID antes de enviarse?
 
@@ -60,7 +60,7 @@ Broadcast is treated as untrusted notification. After receiving post/comment IDs
 
 ### 14. ¿Cómo se evita que dos disparadores de sincronización drenen la cola en paralelo?
 
-`OfflineMutationProcessor` stores one `activeDrain` promise. Concurrent foreground/connectivity triggers share it, while SQLite access also goes through a serial executor.
+`OfflineMutationProcessor` stores one `activeDrain` promise. Concurrent foreground/connectivity/retry/background-task triggers share it, while SQLite access also goes through a serial executor. The orchestrator collapses triggers that arrive during a run into one trailing drain, and the coordinator keeps at most one backoff timer.
 
 ### 15. ¿Cómo preserva el chat un borrador editado durante un send?
 

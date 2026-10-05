@@ -41,7 +41,9 @@ Data-layer sources use private Broadcast channels. A Broadcast is a minimal inva
 
 ## Offline queue
 
-Likes and Comments share one durable SQLite queue ordered by an autoincrement sequence. Every statement is owner-scoped and parameterized. One serial processor peeks the oldest row, sends one mutation, removes it only after a terminal result, then continues. A transient failure blocks later rows so replies cannot overtake their parents. Before each send, the gateway checks that the token subject still matches the queue owner.
+Likes and Comments share one durable SQLite queue ordered by an autoincrement sequence. Every statement is owner-scoped and parameterized. One serial processor peeks the oldest row, sends one mutation, removes it only after a terminal result, then continues. A transient failure blocks later rows so replies cannot overtake their parents. A command the backend authoritatively refuses (post/parent not found, contractual 400 `rejected`, 409 UUID `conflict`) is terminal instead: it leaves the queue with that outcome, so it can never block later actions. Before each send, the gateway checks that the token subject still matches the queue owner.
+
+Drains start on enqueue, sign-in, foreground and connectivity restored. After a transient failure (network, 5xx, captive portal, token refresh, profile bootstrap) the coordinator retries with capped exponential backoff (2, 4, 8, 16, 32, then 60 s) while the app is in use and the network is attemptable; going offline or to background cancels the timer. While someone is signed in, an `expo-background-task` task (Android WorkManager / iOS BGTaskScheduler, network required, minimum 15 min) drains through the same orchestrator with the app in background. It is defined in the custom entry `index.ts`, before Expo Router, because the OS can start the app without loading any route. Expo Go reports background tasks as restricted, so that path needs a development build.
 
 DMs do not use this queue. Story seen has a separate SQLite database because it is a local UX fact rather than a server mutation.
 
@@ -95,8 +97,8 @@ The correct defense is not “everything runs in one thread.” JavaScript coord
 - Network/timeout becomes a typed backend error; UI keeps recoverable state and exposes retry where appropriate.
 - 401 becomes authentication-required or stops owner-bound work.
 - Protected 404 is privacy-safe and may purge cached private media.
-- 409 identifies idempotency conflict instead of silently duplicating data.
-- 500/unavailable retains queued mutations for a later event-driven retry.
+- 409 identifies idempotency conflict instead of silently duplicating data; a queued comment with a conflicting UUID finishes as terminal `conflict` and the existing row stays untouched.
+- 500/unavailable retains queued mutations; they are retried with capped backoff while the app is in use, on reconnection/foreground, and by the OS background task.
 - Malformed JSON or DTO shapes become invalid-response; unchecked backend objects never enter state.
 - SQLite failure blocks durable mutation processing; Story seen falls back to memory for the session.
 - Storage failure leaves publication unpublished and retryable.

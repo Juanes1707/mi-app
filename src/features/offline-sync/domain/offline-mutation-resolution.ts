@@ -2,8 +2,9 @@ import { CREATE_POST_COMMENT, SET_POST_LIKE } from './offline-mutation';
 
 // How one queued mutation was resolved, recorded only once its SQLite row was
 // actually removed. Leaving the queue is not the same as succeeding: a terminal
-// "not found" also finishes the entry. No payload, body or credentials: only the
-// identity of the entry and the authoritative remote outcome.
+// "not found", "rejected" or "conflict" also finishes the entry, so one command the
+// backend will never apply cannot block every later one. No payload, body or
+// credentials: only the identity of the entry and the authoritative remote outcome.
 export type CompletedOfflineMutation =
   | {
       sequence: number;
@@ -11,7 +12,8 @@ export type CompletedOfflineMutation =
       kind: typeof SET_POST_LIKE;
       entityKey: string;
       // confirmed: 200 with the desired state. not-found: contractual 404 post_not_found.
-      outcome: 'confirmed' | 'not-found';
+      // rejected: contractual 400 invalid_post_like_request.
+      outcome: 'confirmed' | 'not-found' | 'rejected';
     }
   | {
       sequence: number;
@@ -20,6 +22,8 @@ export type CompletedOfflineMutation =
       entityKey: string;
       // confirmed: 201 created or 200 exact replay. The 404s are terminal: the comment
       // can no longer be applied by this actor (it may still exist if an earlier
-      // response was lost and visibility changed afterwards).
-      outcome: 'confirmed' | 'post-not-found' | 'parent-not-found';
+      // response was lost and visibility changed afterwards). rejected: contractual 400
+      // invalid_post_comment_request. conflict: 409 comment_creation_conflict (the
+      // existing row with that UUID is left untouched by the backend).
+      outcome: 'confirmed' | 'post-not-found' | 'parent-not-found' | 'rejected' | 'conflict';
     };

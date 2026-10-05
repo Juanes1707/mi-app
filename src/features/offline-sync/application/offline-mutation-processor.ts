@@ -17,8 +17,6 @@ export type DrainBlockReason =
   | 'owner-session-mismatch'
   | 'invalid-request'
   | 'invalid-response'
-  // The comment UUID already exists with another payload or author.
-  | 'comment-conflict'
   | 'unavailable'
   | 'corrupt-data'
   | 'unsupported-version'
@@ -77,9 +75,12 @@ function queueFailureReason(error: unknown): DrainBlockReason {
 // Replays the current user's queue strictly in `sequence` order, one entry at a time,
 // whatever its kind (likes and comments share one global order):
 //   peek oldest → send → terminal? remove and peek again : stop, keeping the entry.
-// An entry that cannot be completed blocks everything after it: skipping it would
+// An entry that cannot be completed YET blocks everything after it: skipping it would
 // change the meaning of the user's history (and a reply must never overtake the
-// comment it answers). No retries or timers live here; callers decide when to drain.
+// comment it answers). An entry the backend authoritatively refuses (not found,
+// rejected, conflict) is finished instead: retrying it could never succeed, and the
+// backend rules already kept the remote data intact. No retries or timers live here;
+// callers decide when to drain.
 export class OfflineMutationProcessor {
   private activeDrain: Promise<OfflineMutationDrainResult> | null = null;
 
@@ -185,14 +186,14 @@ export class OfflineMutationProcessor {
       const result = await this.postLikes.setLike({ expectedOwnerUserId: owner, postId, liked });
       if (result.kind === 'profile-not-ready') return 'profile-not-ready';
       if (result.postId !== postId) return 'invalid-response';
-      // `updated` and the contractual `not-found` both finish this command.
+      // `updated` and the contractual `not-found` / `rejected` all finish this command.
       return {
         completed: {
           sequence: mutation.sequence,
           ownerUserId: owner,
           kind: SET_POST_LIKE,
           entityKey: mutation.entityKey,
-          outcome: result.kind === 'updated' ? 'confirmed' : 'not-found',
+          outcome: result.kind === 'updated' ? 'confirmed' : result.kind,
         },
       };
     } catch (error: unknown) {
@@ -206,7 +207,7 @@ export class OfflineMutationProcessor {
   ): Promise<SendOutcome> {
     const { commentId, postId, parentCommentId, body } = mutation.payload;
     const finished = (
-      outcome: 'confirmed' | 'post-not-found' | 'parent-not-found',
+      outcome: 'confirmed' | 'post-not-found' | 'parent-not-found' | 'rejected' | 'conflict',
     ): SendOutcome => ({
       completed: {
         sequence: mutation.sequence,
@@ -230,6 +231,12 @@ export class OfflineMutationProcessor {
           return finished('post-not-found');
         case 'parent-not-found':
           return finished('parent-not-found');
+        // The backend refused this exact payload, or the UUID belongs to another row
+        // that it keeps untouched: no replay can ever apply it.
+        case 'rejected':
+          return finished('rejected');
+        case 'conflict':
+          return finished('conflict');
         case 'profile-not-ready':
           return 'profile-not-ready';
       }
