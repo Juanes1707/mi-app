@@ -9,12 +9,14 @@ import {
 
 export type PostMediaImageViewState = PostMediaImageState<ImageRef>;
 
-export function usePostMediaImage(imagePath: string, isVisible: boolean) {
+// `isRetained` defaults to true for single-image screens (Post detail); the Feed sets
+// it per row so only rows on or next to the screen hold a decoded bitmap.
+export function usePostMediaImage(imagePath: string, isVisible: boolean, isRetained = true) {
   const [state, setState] = useState<PostMediaImageViewState>(() => (
-    initialPostMediaImageState(imagePath, postImageSource.peek(imagePath))
+    initialPostMediaImageState(imagePath, isRetained ? postImageSource.peek(imagePath) : undefined)
   ));
   const stateRef = useRef<PostMediaImageViewState>(state);
-  const shouldRevalidateRef = useRef(state.status === 'loaded');
+  const needsRevalidationRef = useRef(state.status === 'loaded');
   const [attempt, setAttempt] = useState(0);
   const commitState = useCallback((next: PostMediaImageViewState) => {
     stateRef.current = next;
@@ -25,9 +27,13 @@ export function usePostMediaImage(imagePath: string, isVisible: boolean) {
     const plan = planPostMediaImageLoad(
       stateRef.current,
       imagePath,
-      isVisible,
-      shouldRevalidateRef.current,
+      { isVisible, isRetained },
+      () => postImageSource.peek(imagePath),
+      needsRevalidationRef.current,
     );
+    needsRevalidationRef.current = plan.needsRevalidation;
+    // Dropping a far row's ImageRef from state is what lets Hermes collect it:
+    // expo-image reports the bitmap size to the GC as external memory pressure.
     if (plan.state !== stateRef.current) commitState(plan.state);
     if (!plan.shouldRequest) return;
     let active = true;
@@ -35,10 +41,10 @@ export function usePostMediaImage(imagePath: string, isVisible: boolean) {
     void request.result.then((outcome) => {
       if (!active) return;
       if (outcome.status === 'loaded') {
-        shouldRevalidateRef.current = false;
+        needsRevalidationRef.current = false;
         commitState({ status: 'loaded', imagePath, image: outcome.image });
       } else if (outcome.status === 'failed') {
-        shouldRevalidateRef.current = false;
+        needsRevalidationRef.current = false;
         commitState({
           status: 'error',
           imagePath,
@@ -52,14 +58,12 @@ export function usePostMediaImage(imagePath: string, isVisible: boolean) {
       active = false;
       request.cancel();
     };
-  }, [imagePath, isVisible, attempt, commitState]);
+  }, [imagePath, isVisible, isRetained, attempt, commitState]);
 
   const retry = useCallback(() => {
     if (isVisible) setAttempt((current) => current + 1);
   }, [isVisible]);
 
-  // Viewability controls acquisitions and cancellation. A completed bitmap stays
-  // rendered while its row exists, so crossing the viewability threshold cannot
-  // flash the placeholder. The imagePath guard still protects recycled rows.
-  return { state: selectPostMediaImageViewState(state, imagePath), retry };
+  // The imagePath guard protects recycled rows; a far row never renders a bitmap.
+  return { state: selectPostMediaImageViewState(state, imagePath, isRetained), retry };
 }

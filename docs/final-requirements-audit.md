@@ -50,7 +50,7 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 | Memory cleanup and decode bounds | PASS | memory pressure binding, decoder purge, 1440 px limit | RAM references are cleared under pressure; Expo internal caches are purged; decoded longest edge is bounded. | ✅ Source inspection | `meminfo` was not available. |
 | Posts and Stories share cache infrastructure | PASS | `post-media-container.ts`, `stories-container.ts` | Both use the same RAM LRU, disk LRU, downloader and decoder; Stories use a namespaced key and owner-bound authorizer. | ✅ Construction inspection | Native runtime was not exercised. |
 | Expo Image does not add a parallel cache | PASS | Post media component and decoder | Render uses decoded local `ImageRef` with `cachePolicy="none"`; decoder purges internal caches. | ✅ Source inspection | Native library internals were not profiled. |
-| Long Feed readiness | PASS | Feed `FlatList`, keyset page loading, viewability control | Virtualization and bounded image work are present. | ✅ Source inspection | Long continuous device scroll was not exercised. |
+| Long Feed readiness | PASS — simulated/local | Feed `FlatList` (windowSize 7), keyset page loading, viewability control, retained-row rule | Only visible rows ±1 hold decoded bitmaps; a 600-post down-and-back scroll simulation with the real LRU peaks at 39.6 MiB (150 MiB before) and is independent of list length, with no placeholder flash. | 🧪 `post-media-image-state.test.mjs` | Device memory (`meminfo`) was not measured. |
 | 60 FPS long Feed | BLOCKED — environment | Architecture is prepared but no metric exists | No Android SDK, ADB, emulator or physical device; no `gfxinfo` trace. | ⚠️ Not executable | 60 FPS must not be claimed. |
 | Optimistic Like update | PASS | `use-optimistic-post-likes.ts` | Visible state changes immediately and overlays canonical feed state. | ✅ Source inspection | Gesture latency was not measured. |
 | Durable Like projection/queue | PASS | SQLite offline schema/queue | Owner, post and desired state are stored durably. | ✅ Source/SQL inspection | Device process-death scenario was not exercised. |
@@ -114,8 +114,8 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 
 | Status | Count |
 |---|---:|
-| PASS | 67 |
-| PASS — simulated/local | 15 |
+| PASS | 66 |
+| PASS — simulated/local | 16 |
 | BLOCKED — environment | 6 |
 | FAIL | 0 |
 

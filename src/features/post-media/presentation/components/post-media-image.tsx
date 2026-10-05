@@ -8,14 +8,16 @@ import { useTheme } from '@/hooks/use-theme';
 type PostMediaImageProps = {
   imagePath: string;
   isVisible: boolean;
+  // Whether this row may hold its decoded bitmap (see usePostMediaImage).
+  isRetained?: boolean;
   accessibilityLabel: string;
 };
 
 export const PostMediaImage = memo(function PostMediaImage({
-  imagePath, isVisible, accessibilityLabel,
+  imagePath, isVisible, isRetained = true, accessibilityLabel,
 }: PostMediaImageProps) {
   const theme = useTheme();
-  const { state, retry } = usePostMediaImage(imagePath, isVisible);
+  const { state, retry } = usePostMediaImage(imagePath, isVisible, isRetained);
 
   return (
     <View style={[styles.media, { backgroundColor: theme.backgroundElement }]}>

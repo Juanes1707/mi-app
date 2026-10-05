@@ -12,6 +12,8 @@ const dateFormatter = new Intl.DateTimeFormat('es-CO', {
 type PostCardProps = {
   post: FeedPost;
   isMediaVisible: boolean;
+  // Feed rows far from the screen let go of their decoded image (default: kept).
+  isMediaRetained?: boolean;
   // Displayed like state (server + pending local intentions), computed by the screen.
   isLiked: boolean;
   likesCount: number;
@@ -35,8 +37,8 @@ function commentsAccessibilityLabel(count: number): string {
 }
 
 export const PostCard = memo(function PostCard({
-  post, isMediaVisible, isLiked, likesCount, isLikeEnabled, likeSaveFailed, onToggleLike, onOpenAuthor,
-  onOpenComments, onOpenPost, onSharePost,
+  post, isMediaVisible, isMediaRetained = true, isLiked, likesCount, isLikeEnabled, likeSaveFailed,
+  onToggleLike, onOpenAuthor, onOpenComments, onOpenPost, onSharePost,
 }: PostCardProps) {
   const theme = useTheme();
   const username = post.author.username?.trim();
@@ -64,6 +66,7 @@ export const PostCard = memo(function PostCard({
       <PostMediaImage
         accessibilityLabel={`Publicación de ${name}`}
         imagePath={post.imagePath}
+        isRetained={isMediaRetained}
         isVisible={isMediaVisible}
       />
 

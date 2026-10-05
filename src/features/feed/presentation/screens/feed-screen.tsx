@@ -14,7 +14,7 @@ import type { FeedErrorCode } from '@/features/feed/domain/errors/feed-error';
 import { PostCard } from '@/features/feed/presentation/components/post-card';
 import { useFeed } from '@/features/feed/presentation/hooks/use-feed';
 import { useOptimisticPostLikes } from '@/features/feed/presentation/hooks/use-optimistic-post-likes';
-import { collectVisiblePostIds } from '@/features/feed/presentation/visible-post-ids';
+import { collectRetainedPostIds, collectVisiblePostIds } from '@/features/feed/presentation/visible-post-ids';
 import { usePostMediaMemoryPressure } from '@/features/post-media/presentation/hooks/use-post-media-memory-pressure';
 import { sharePostReference } from '@/features/post-sharing/application/share-post-reference';
 import { StoryTrayBar } from '@/features/stories/presentation/components/story-tray-bar';
@@ -37,6 +37,13 @@ const MEDIA_VIEWABILITY_CONFIG: ViewabilityConfig = {
   waitForInteraction: false,
 };
 const NO_VISIBLE_POSTS: ReadonlySet<string> = new Set();
+// Posts on each side of the visible range that keep their decoded image.
+const RETAINED_NEIGHBOR_POSTS = 1;
+// Virtualization: a Post is roughly one screen tall, so 7 viewports (3 above, 3
+// below) keep a fling covered while unmounting rows that are farther away.
+const FEED_WINDOW_SIZE = 7;
+const FEED_INITIAL_POSTS = 4;
+const FEED_POSTS_PER_BATCH = 4;
 
 function CreatePostButton() {
   const router = useRouter();
@@ -141,6 +148,10 @@ export function FeedScreen() {
       setVisiblePostIds((previous) => collectVisiblePostIds(viewableItems, previous));
     },
   ).current;
+  const retainedPostIds = useMemo(
+    () => collectRetainedPostIds(state.page.posts, visiblePostIds, RETAINED_NEIGHBOR_POSTS),
+    [state.page.posts, visiblePostIds],
+  );
   const {
     desiredLikes, failedPostIds, pendingLikesStatus, getDisplayedLike, toggleLike, retryPendingLikesLoad,
   } = likes;
@@ -153,6 +164,7 @@ export function FeedScreen() {
       <PostCard
         post={item}
         isMediaVisible={visiblePostIds.has(item.id)}
+        isMediaRetained={retainedPostIds.has(item.id)}
         isLiked={displayed.isLiked}
         likesCount={displayed.likesCount}
         isLikeEnabled={isLikeEnabled}
@@ -165,12 +177,12 @@ export function FeedScreen() {
       />
     );
   }, [
-    openAuthor, openComments, openPost, sharePost, visiblePostIds, getDisplayedLike,
+    openAuthor, openComments, openPost, sharePost, visiblePostIds, retainedPostIds, getDisplayedLike,
     isLikeEnabled, failedPostIds, toggleLike,
   ]);
   const listExtraData = useMemo(
-    () => ({ visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled }),
-    [visiblePostIds, desiredLikes, failedPostIds, isLikeEnabled],
+    () => ({ visiblePostIds, retainedPostIds, desiredLikes, failedPostIds, isLikeEnabled }),
+    [visiblePostIds, retainedPostIds, desiredLikes, failedPostIds, isLikeEnabled],
   );
 
   const initialFeedStatus = state.status === 'initial-loading' ? (
@@ -188,6 +200,7 @@ export function FeedScreen() {
         contentContainerStyle={styles.listContent}
         data={state.page.posts}
         extraData={listExtraData}
+        initialNumToRender={FEED_INITIAL_POSTS}
         ItemSeparatorComponent={PostSeparator}
         keyExtractor={getPostKey}
         ListHeaderComponent={
@@ -236,14 +249,18 @@ export function FeedScreen() {
             <Feedback message="No pudimos cargar más publicaciones." onRetry={retryLoadMore} />
           ) : null
         }
+        maxToRenderPerBatch={FEED_POSTS_PER_BATCH}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.5}
         onViewableItemsChanged={onViewableItemsChanged}
         onRefresh={refreshAll}
         refreshing={state.operation === 'refreshing'}
+        // Android: offscreen native views are detached from the hierarchy while mounted.
+        removeClippedSubviews={Platform.OS === 'android'}
         renderItem={renderPost}
         showsVerticalScrollIndicator={false}
         viewabilityConfig={MEDIA_VIEWABILITY_CONFIG}
+        windowSize={FEED_WINDOW_SIZE}
       />
     </SafeAreaView>
   );

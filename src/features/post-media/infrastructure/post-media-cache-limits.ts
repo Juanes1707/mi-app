@@ -1,5 +1,6 @@
 // Level 1 budget: estimated decoded bitmap bytes retained BY THE CACHE.
-// Bitmaps held by currently visible cells are dropped from their state when they leave the viewport.
+// Feed rows hold their own bitmap only while visible or next to a visible row; any
+// other row drops it, so decoded memory stays near this budget whatever the list length.
 export const POST_MEDIA_MEMORY_BUDGET_BYTES = 32 * 1024 * 1024;
 
 // Level 2 budget: encoded file bytes stored on disk.

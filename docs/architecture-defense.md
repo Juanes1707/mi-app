@@ -59,7 +59,7 @@ L2 encoded disk LRU (128 MiB)
 signed download → validated final file → bounded decode (1440 px)
 ```
 
-Posts and Stories share the same memory/disk/downloader/decoder instances. Story keys add a bucket namespace. Each acquisition authorizes before consulting either cache level, so cached bytes never become permission. One in-flight job per key serves multiple consumers; the last cancellation aborts the download and partial files are discarded. `expo-image` rendering uses `cachePolicy="none"` to avoid a second uncontrolled cache.
+Posts and Stories share the same memory/disk/downloader/decoder instances. Story keys add a bucket namespace. Each acquisition authorizes before consulting either cache level, so cached bytes never become permission. One in-flight job per key serves multiple consumers; the last cancellation aborts the download and partial files are discarded. `expo-image` rendering uses `cachePolicy="none"` to avoid a second uncontrolled cache. In the Feed, only visible rows and one neighbour on each side hold a decoded `ImageRef`; farther mounted rows drop it, so decoded memory is bounded by the LRU budget plus the viewport (39.6 MiB peak in a 600-post scroll simulation, versus 150 MiB when every mounted row kept its bitmap). `FlatList` uses `windowSize` 7 and `removeClippedSubviews` on Android.
 
 ## Navigation and owner isolation
 

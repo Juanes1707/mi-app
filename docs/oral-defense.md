@@ -106,11 +106,11 @@ The progress interpolation runs with `withTiming` on UI work instead of a JS int
 
 ### 25. ¿Qué ocurre cuando una celda sale del viewport?
 
-Feed visibility removes its image consumer and clears the cell-held image. If no other consumer needs the key, `PostImageLoader` aborts the download and discards the partial file.
+Feed visibility removes its image consumer, so if no other consumer needs the key `PostImageLoader` aborts the download and discards the partial file. The decoded bitmap is kept only while the row is visible or next to a visible row (so crossing the threshold never flashes the placeholder); farther rows drop their `ImageRef`, and expo-image reports the bitmap size to Hermes as external memory pressure so the GC reclaims it. A row coming back next to the screen is restored from the RAM LRU before it scrolls in, and is re-authorized once visible.
 
 ### 26. ¿Cómo mantiene el Feed preparado un scroll largo?
 
-It uses `FlatList`, keyset pages, viewport-controlled image work, one in-flight job per media key, bounded decode and byte budgets. The design is audited; 60 FPS still requires Android `gfxinfo` measurement.
+It uses `FlatList` with `windowSize` 7, batches of 4 rows and `removeClippedSubviews` on Android, keyset pages, viewport-controlled image work, one in-flight job per media key, bounded decode and byte budgets. Only visible rows ±1 hold decoded bitmaps, so a long scroll simulation over 600 posts peaks at 39.6 MiB of decoded images (150 MiB before this rule) and does not grow with the list. 60 FPS is checked on device with the performance monitor; a formal `gfxinfo` trace still needs a development build and ADB.
 
 ### 27. ¿Por qué una respuesta de red no debe asumir el mismo hilo que la UI?
 
@@ -132,7 +132,7 @@ L1 keeps decoded images for fast rendering but is expensive, so it is limited to
 
 ### 31. ¿Cómo se evita OOM con imágenes?
 
-The project bounds decoded RAM by estimated width×height×4, refuses oversize entries, decodes to at most 1440 px, clears visible state off viewport, cancels downloads and clears caches under memory pressure.
+The project bounds decoded RAM by estimated width×height×4, refuses oversize entries, decodes to at most 1440 px, lets only visible rows ±1 hold a bitmap (the rest live only in the 32 MiB LRU), cancels downloads and clears caches under memory pressure. Decoded memory therefore depends on the viewport, not on how long the Feed is.
 
 ### 32. ¿Por qué autorizar antes de leer cache?
 
