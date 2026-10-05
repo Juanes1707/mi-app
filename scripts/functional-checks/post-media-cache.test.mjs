@@ -167,3 +167,64 @@ test('a RAM hit still requires authorization, and revoked access purges both lev
   assert.deepEqual(events.slice(2), ['authorize', 'purge-ram', 'purge-disk', 'purge-native']);
   assert.equal(memory.get(imagePath), undefined);
 });
+
+test('the final viewport consumer aborts one shared download and removes its partial file', async () => {
+  const imagePath = key('9');
+  const events = [];
+  let authorizeCalls = 0;
+  let downloadStarted;
+  const downloading = new Promise((resolve) => { downloadStarted = resolve; });
+  const loader = new PostImageLoader({
+    authorizer: {
+      execute: async () => {
+        authorizeCalls += 1;
+        return { signedUrl: 'https://example.test/signed-image' };
+      },
+    },
+    memory: {
+      get: () => undefined,
+      set: () => true,
+      delete: () => undefined,
+    },
+    disk: {
+      lookup: async () => null,
+      preparePartial: async () => ({ name: 'pending.part', uri: 'file:///cache/pending.part' }),
+      discardPartial: async (name) => { events.push(`discard:${name}`); },
+      commit: async () => { events.push('commit'); return 'file:///cache/final.jpg'; },
+      remove: async () => undefined,
+    },
+    downloader: {
+      download: async (_url, _destination, signal) => {
+        events.push('download');
+        downloadStarted();
+        await new Promise((resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            events.push('abort');
+            reject(new Error('cancelled'));
+          }, { once: true });
+        });
+      },
+    },
+    decoder: {
+      decode: async () => { events.push('decode'); return { bytes: 4 }; },
+      purgeInternalCaches: async () => undefined,
+    },
+  });
+
+  const first = loader.request(imagePath);
+  const second = loader.request(imagePath);
+  await downloading;
+  assert.equal(authorizeCalls, 1);
+
+  first.cancel();
+  assert.deepEqual(await first.result, { status: 'cancelled' });
+  assert.deepEqual(events, ['download']);
+
+  second.cancel();
+  assert.deepEqual(await second.result, { status: 'cancelled' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events, ['download', 'abort', 'discard:pending.part']);
+  assert.equal(events.includes('commit'), false);
+  assert.equal(events.includes('decode'), false);
+});
