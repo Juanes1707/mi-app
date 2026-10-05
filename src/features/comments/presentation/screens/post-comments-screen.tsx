@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View,
   type ListRenderItem,
@@ -8,7 +8,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/features/auth/presentation/hooks/use-auth';
 import { isUuid } from '@/features/comments/domain/post-comment-values';
 import type { PostCommentsErrorCode } from '@/features/comments/domain/post-comments-error';
-import { flattenVisibleRows, type VisibleCommentRow } from '@/features/comments/presentation/comment-tree';
+import {
+  flattenVisibleRows, ROOT_BRANCH, type VisibleCommentRow,
+} from '@/features/comments/presentation/comment-tree';
 import { CommentBranchStatusRow } from '@/features/comments/presentation/components/comment-branch-status-row';
 import { CommentComposer } from '@/features/comments/presentation/components/comment-composer';
 import { CommentRow } from '@/features/comments/presentation/components/comment-row';
@@ -16,6 +18,7 @@ import { LocalCommentRow } from '@/features/comments/presentation/components/loc
 import { useOptimisticPostComments } from '@/features/comments/presentation/hooks/use-optimistic-post-comments';
 import { usePostComments } from '@/features/comments/presentation/hooks/use-post-comments';
 import { useRealtimePostComments } from '@/features/comments/presentation/hooks/use-realtime-post-comments';
+import { shouldCatchUpRealtimeRoot } from '@/features/comments/presentation/realtime-root-catch-up';
 import { normalizeUuid } from '@/features/offline-sync/domain/uuid';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -65,6 +68,15 @@ function PostComments({ postId }: { postId: string }) {
   } = usePostComments(postId);
   // Live hints → authorized GET → canonical comments kept outside the paginated tree.
   const realtime = useRealtimePostComments({ ownerUserId, postId, tree, onPostUnavailable: markPostUnavailable });
+  const lastHandledRealtimeSubscription = useRef({ postId: '', version: 0 });
+  useEffect(() => {
+    const handledVersion = lastHandledRealtimeSubscription.current.postId === postId
+      ? lastHandledRealtimeSubscription.current.version
+      : 0;
+    if (!shouldCatchUpRealtimeRoot(realtime.subscriptionVersion, handledVersion, root?.loaded === true)) return;
+    lastHandledRealtimeSubscription.current = { postId, version: realtime.subscriptionVersion };
+    catchUpBranches(postId, [ROOT_BRANCH]);
+  }, [catchUpBranches, postId, realtime.subscriptionVersion, root?.loaded]);
   const onReplyCreated = useCallback(
     (parentCommentId: string) => expandReplies(parentCommentId, { localChildren: true }),
     [expandReplies],

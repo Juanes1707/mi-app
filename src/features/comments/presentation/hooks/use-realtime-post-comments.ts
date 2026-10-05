@@ -16,10 +16,11 @@ type RealtimeState = {
   postId: string;
   comments: RealtimeCommentOverlay;
   status: PostCommentRealtimeStatus | null;
+  subscriptionVersion: number;
 };
 
 function initialStateFor(owner: string | null, postId: string): RealtimeState {
-  return { owner, postId, comments: EMPTY_REALTIME_OVERLAY, status: null };
+  return { owner, postId, comments: EMPTY_REALTIME_OVERLAY, status: null, subscriptionVersion: 0 };
 }
 
 type Options = {
@@ -131,7 +132,16 @@ export function useRealtimePostComments({ ownerUserId, postId, tree, onPostUnava
       },
       onStatus: (status) => {
         if (disposed || !isCurrent(generation)) return;
-        commit((current) => (current.status === status ? current : { ...current, status }));
+        commit((current) => {
+          if (current.status === status) return current;
+          return {
+            ...current,
+            status,
+            subscriptionVersion: status === 'subscribed'
+              ? current.subscriptionVersion + 1
+              : current.subscriptionVersion,
+          };
+        });
       },
     }).then(
       (subscription) => {
@@ -169,5 +179,9 @@ export function useRealtimePostComments({ ownerUserId, postId, tree, onPostUnava
     [state, ownerUserId, postId],
   );
 
-  return { comments: visible.comments, status: visible.status };
+  return {
+    comments: visible.comments,
+    status: visible.status,
+    subscriptionVersion: visible.subscriptionVersion,
+  };
 }
