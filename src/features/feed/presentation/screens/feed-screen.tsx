@@ -16,7 +16,7 @@ import { useFeed } from '@/features/feed/presentation/hooks/use-feed';
 import { useOptimisticPostLikes } from '@/features/feed/presentation/hooks/use-optimistic-post-likes';
 import { collectRetainedPostIds, collectVisiblePostIds } from '@/features/feed/presentation/visible-post-ids';
 import { usePostMediaMemoryPressure } from '@/features/post-media/presentation/hooks/use-post-media-memory-pressure';
-import { sharePostReference } from '@/features/post-sharing/application/share-post-reference';
+import { sharePost as sharePostLink } from '@/features/post-sharing/post-sharing-container';
 import { StoryTrayBar } from '@/features/stories/presentation/components/story-tray-bar';
 import { useStoryPublication } from '@/features/stories/presentation/hooks/use-story-publication';
 import { useStoryTray } from '@/features/stories/presentation/hooks/use-story-tray';
@@ -136,7 +136,7 @@ export function FeedScreen() {
     router.push({ pathname: '/post/[postId]', params: { postId } });
   }, [router]);
   const sharePost = useCallback((postId: string) => {
-    void sharePostReference(postId).catch(() => {
+    void sharePostLink(postId).catch(() => {
       Alert.alert('No pudimos compartir', 'Inténtalo de nuevo.');
     });
   }, []);

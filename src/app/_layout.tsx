@@ -16,6 +16,10 @@ import { useTheme } from '@/hooks/use-theme';
 
 SplashScreen.preventAutoHideAsync();
 
+// A deep link that opens the app directly on a nested route (e.g. /post/{uuid})
+// keeps `index` underneath, so Back leads into the app instead of closing it.
+export const unstable_settings = { initialRouteName: 'index' };
+
 function AuthenticatedContent() {
   const { isLoading, user } = useAuth();
   const theme = useTheme();

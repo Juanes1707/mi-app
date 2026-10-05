@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PostCard } from '@/features/feed/presentation/components/post-card';
 import { usePostDetail } from '@/features/post-detail/presentation/hooks/use-post-detail';
 import { usePostMediaMemoryPressure } from '@/features/post-media/presentation/hooks/use-post-media-memory-pressure';
-import { sharePostReference } from '@/features/post-sharing/application/share-post-reference';
+import { sharePost as sharePostLink } from '@/features/post-sharing/post-sharing-container';
 import { useTheme } from '@/hooks/use-theme';
 import { normalizeUuid } from '@/shared/domain/uuid';
 
@@ -39,7 +39,7 @@ function ValidPostDetail({ postId }: { postId: string }) {
     router.push({ pathname: '/post/[postId]/comments', params: { postId: targetPostId } });
   }, [router]);
   const sharePost = useCallback((targetPostId: string) => {
-    void sharePostReference(targetPostId).catch(() => {
+    void sharePostLink(targetPostId).catch(() => {
       Alert.alert('No pudimos compartir', 'Inténtalo de nuevo.');
     });
   }, []);

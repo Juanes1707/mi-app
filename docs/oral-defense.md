@@ -90,6 +90,10 @@ A receipt stores the newest peer message known delivered/read. Every peer messag
 
 Reading a message logically proves it reached the recipient. Both SQL and the coordinator advance delivered when read advances; a later older delivered request becomes redundant.
 
+### 21.1. ¿Cómo abre un enlace compartido la app directamente en la publicación?
+
+The share sheet sends an https link to the public `post-link` Edge Function, because WhatsApp and similar apps do not make custom schemes tappable. The function validates the UUID and redirects (302) to `instagramclone://post/{uuid}`, which the installed app intercepts; in Expo Go it redirects instead to the dev server link `exp://<host>/--/post/{uuid}` attached by the sender, accepted only when enabled on the server and only if it is exactly that Post's route. Expo Router maps either link to `/post/[postId]`, keeps `index` underneath for Back, and the Post is loaded through the authorized Edge read, so a private Post stays hidden from non-followers.
+
 ## Threads and performance
 
 ### 22. ¿Qué corre en JS thread y qué puede ejecutarse fuera?

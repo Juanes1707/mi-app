@@ -32,7 +32,7 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 | Dynamic Likes | PASS — simulated/local | optimistic like hook, SQLite queue, `post-likes` Edge Function/RPC | UI projection, durable command and canonical result are implemented; representative local regression and TypeScript passed. | 🧪 Local/static | Hosted mutation was not exercised. |
 | Nested Comments | PASS | comment tree, paginated comment repository and SQL RPCs | Root/reply IDs, parent relation, flattened tree and branch pagination are implemented. | ✅ Source/SQL inspection | Hosted nested thread was not exercised. |
 | Realtime Comments | PASS — simulated/local | private Broadcast migration/source and targeted `GET /post-comment` | Broadcast carries IDs only; Mobile fetches canonical authorized data and deduplicates. | 🧪 Local/static | Real hosted WebSocket was not exercised. |
-| Share Post | PASS | `post-sharing/**`, Feed/Post detail actions | Shares `instagramclone://post/{uuid}` through the platform share API. | ✅ Source inspection | Android share sheet was not exercised. |
+| Share Post | PASS — simulated/local | `post-sharing/**`, `supabase/functions/post-link`, Feed/Post detail actions | Shares an https `post-link` URL through the platform share API; the public Edge Function redirects to `instagramclone://post/{uuid}` (or, when enabled for development, to the sender's Expo Go link for that exact Post). | 🧪 `post-link.test.mjs` round trip, including open-redirect attempts | Function must be deployed; tapping the link on a phone is the manual check. |
 | Public Profiles | PASS | profile search/view repositories, screens and Edge functions | Search and profile view models support public profiles. | ✅ Source inspection | Hosted profiles were not exercised. |
 | Private Profiles and relationship state | PASS | `get_profile_view`, profile view screen, follow flow | Private flag and relationship (`none`, `request_pending`, `following`) are returned through Edge. | ✅ Source/SQL inspection | Hosted privacy path was not exercised. |
 | Followers/following graph | PASS | `follows`, `follow_requests`, follow RPCs | Accepted relationships live in `follows`; pending requests remain separate. | ✅ SQL inspection | No hosted multi-user run. |
@@ -114,8 +114,8 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 
 | Status | Count |
 |---|---:|
-| PASS | 68 |
-| PASS — simulated/local | 15 |
+| PASS | 67 |
+| PASS — simulated/local | 16 |
 | BLOCKED — environment | 5 |
 | FAIL | 0 |
 

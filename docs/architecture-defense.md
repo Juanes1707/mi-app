@@ -65,6 +65,8 @@ Posts and Stories share the same memory/disk/downloader/decoder instances. Story
 
 The persistent tab bar has Home, Explore, Activity and Profile. Each tab owns a nested Stack. Global routes handle Post deep links, comments, DMs and Stories. `app.json` tracks `miapp` and `instagramclone` schemes.
 
+Sharing a Post shares `https://<project>.supabase.co/functions/v1/post-link/{uuid}`, because messaging apps only make http(s) links tappable. The public `post-link` Edge Function reads no data and answers 302 to the app link: `instagramclone://post/{uuid}` for an installed app, or, only when `POST_LINK_EXPO_GO_REDIRECTS=enabled`, the Expo Go dev server link `exp://<host>/--/post/{uuid}` that the app attached as `to` (built with `expo-linking` because the tunnel address changes every session). The target must be exactly that Post's route on an exp(s) URL without credentials, query or fragment; anything else falls back to the app scheme, so the bridge is not an open redirect. Expo Router intercepts the link and opens `/post/[postId]`; `unstable_settings.initialRouteName = 'index'` keeps the app underneath so Back returns to Home. Opening the Post still requires the authorized Edge read.
+
 The authenticated Stack is keyed by `user.id`. Account A's entire route subtree therefore unmounts before account B receives fresh screens. Long-lived background hosts stay outside that Stack because they need to observe auth/connectivity globally; they bind every operation to an owner and reject mismatched token subjects. Feature hooks also use mounted flags, generations and exact route/owner keys to ignore late callbacks.
 
 ## Followers and following lists

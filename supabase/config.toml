@@ -1,6 +1,10 @@
 [functions.health]
 verify_jwt = false
 
+# Public HTTPS bridge for shared Post links (opened from browsers, no JWT).
+[functions.post-link]
+verify_jwt = false
+
 [functions.auth-check]
 verify_jwt = true
 

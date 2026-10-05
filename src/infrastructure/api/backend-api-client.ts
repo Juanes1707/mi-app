@@ -191,7 +191,7 @@ export class BackendApiClient {
   }
 }
 
-function getBackendBaseUrl(): string {
+export function getBackendBaseUrl(): string {
   const baseUrl = process.env.EXPO_PUBLIC_BACKEND_BASE_URL;
 
   if (!baseUrl) {
