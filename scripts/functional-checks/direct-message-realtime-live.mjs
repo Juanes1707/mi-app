@@ -34,6 +34,10 @@ const { parseMessageCreatedMessage } = await import(pathToFileURL(path.join(
   root, 'src/features/direct-messages/data/supabase-direct-message-realtime-source.ts',
 )).href);
 
+const { parseDirectMessageResponse } = await import(pathToFileURL(path.join(
+  root, 'src/features/direct-messages/data/direct-messages-response.ts',
+)).href);
+
 const TIMEOUT_MS = 12_000;
 
 function join(channel) {
@@ -111,8 +115,13 @@ async function main() {
 
     const read = await edgeRequest(config, receiver.token,
       `/direct-message?${new URLSearchParams({ conversationId, messageId })}`);
-    const readOk = read?.message?.id?.toLowerCase() === messageId;
-    console.log(`${readOk ? 'PASS' : 'FAIL'} authorized read: ${JSON.stringify(Object.keys(read ?? {}))}`);
+    // The exact parser the chat runs on this response before showing the message.
+    const readOk = parseDirectMessageResponse(read, { conversationId, messageId }) !== null;
+    console.log(`${readOk ? 'PASS' : 'FAIL'} authorized read: app parser ${readOk ? 'accepted' : 'REJECTED'} ${JSON.stringify({
+      keys: Object.keys(read ?? {}), messageKeys: Object.keys(read?.message ?? {}),
+      createdAt: read?.message?.createdAt, deliveredAt: read?.message?.deliveredAt, readAt: read?.message?.readAt,
+      conversationId: read?.message?.conversationId,
+    })}`);
     if (failed || !readOk) process.exitCode = 1;
   } finally {
     await receiver.client.removeChannel(chat);
