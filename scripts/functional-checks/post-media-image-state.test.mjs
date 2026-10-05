@@ -1,7 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { planPostMediaImageLoad } from '../../src/features/post-media/presentation/post-media-image-state.ts';
+import {
+  initialPostMediaImageState,
+  planPostMediaImageLoad,
+  selectPostMediaImageViewState,
+} from '../../src/features/post-media/presentation/post-media-image-state.ts';
+
+test('a remounted row starts with its decoded RAM image', () => {
+  const image = { nativeRef: 'cached-fixture' };
+  assert.deepEqual(initialPostMediaImageState('author/post.png', image), {
+    status: 'loaded',
+    imagePath: 'author/post.png',
+    image,
+  });
+
+  const validation = planPostMediaImageLoad(
+    initialPostMediaImageState('author/post.png', image),
+    'author/post.png',
+    true,
+    true,
+  );
+  assert.equal(validation.state.status, 'loaded');
+  assert.equal(validation.shouldRequest, true);
+});
 
 test('a loaded image survives leaving and re-entering the viewport', () => {
   const image = { nativeRef: 'fixture' };
@@ -10,6 +32,7 @@ test('a loaded image survives leaving and re-entering the viewport', () => {
   const hidden = planPostMediaImageLoad(loaded, loaded.imagePath, false);
   assert.equal(hidden.shouldRequest, false);
   assert.equal(hidden.state, loaded);
+  assert.equal(selectPostMediaImageViewState(hidden.state, loaded.imagePath), loaded);
 
   const visibleAgain = planPostMediaImageLoad(hidden.state, loaded.imagePath, true);
   assert.equal(visibleAgain.shouldRequest, false);

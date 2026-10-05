@@ -59,6 +59,10 @@ export class PostImageLoader<TImage> implements PostImageSource<TImage> {
 
   constructor(private readonly deps: PostImageLoaderDependencies<TImage>) {}
 
+  peek(imagePath: string): TImage | undefined {
+    return this.deps.memory.get(imagePath);
+  }
+
   request(imagePath: string): PostImageRequest<TImage> {
     const existing = this.inFlight.get(imagePath);
     const job: LoadJob<TImage> = existing ?? {

@@ -3,16 +3,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { postImageSource } from '@/features/post-media/post-media-container';
 import {
-  planPostMediaImageLoad, type PostMediaImageState,
+  initialPostMediaImageState, planPostMediaImageLoad, type PostMediaImageState,
+  selectPostMediaImageViewState,
 } from '@/features/post-media/presentation/post-media-image-state';
 
 export type PostMediaImageViewState = PostMediaImageState<ImageRef>;
 
-const IDLE: PostMediaImageViewState = { status: 'idle' };
-
 export function usePostMediaImage(imagePath: string, isVisible: boolean) {
-  const [state, setState] = useState<PostMediaImageViewState>(IDLE);
-  const stateRef = useRef<PostMediaImageViewState>(IDLE);
+  const [state, setState] = useState<PostMediaImageViewState>(() => (
+    initialPostMediaImageState(imagePath, postImageSource.peek(imagePath))
+  ));
+  const stateRef = useRef<PostMediaImageViewState>(state);
+  const shouldRevalidateRef = useRef(state.status === 'loaded');
   const [attempt, setAttempt] = useState(0);
   const commitState = useCallback((next: PostMediaImageViewState) => {
     stateRef.current = next;
@@ -20,7 +22,12 @@ export function usePostMediaImage(imagePath: string, isVisible: boolean) {
   }, []);
 
   useEffect(() => {
-    const plan = planPostMediaImageLoad(stateRef.current, imagePath, isVisible);
+    const plan = planPostMediaImageLoad(
+      stateRef.current,
+      imagePath,
+      isVisible,
+      shouldRevalidateRef.current,
+    );
     if (plan.state !== stateRef.current) commitState(plan.state);
     if (!plan.shouldRequest) return;
     let active = true;
@@ -28,8 +35,10 @@ export function usePostMediaImage(imagePath: string, isVisible: boolean) {
     void request.result.then((outcome) => {
       if (!active) return;
       if (outcome.status === 'loaded') {
+        shouldRevalidateRef.current = false;
         commitState({ status: 'loaded', imagePath, image: outcome.image });
       } else if (outcome.status === 'failed') {
+        shouldRevalidateRef.current = false;
         commitState({
           status: 'error',
           imagePath,
@@ -49,10 +58,8 @@ export function usePostMediaImage(imagePath: string, isVisible: boolean) {
     if (isVisible) setAttempt((current) => current + 1);
   }, [isVisible]);
 
-  // Render guard: a result for another imagePath (recycled row) or for an
-  // offscreen cell is never exposed, even before the effect above runs.
-  const visibleState = isVisible && state.status !== 'idle' && state.imagePath === imagePath
-    ? state
-    : IDLE;
-  return { state: visibleState, retry };
+  // Viewability controls acquisitions and cancellation. A completed bitmap stays
+  // rendered while its row exists, so crossing the viewability threshold cannot
+  // flash the placeholder. The imagePath guard still protects recycled rows.
+  return { state: selectPostMediaImageViewState(state, imagePath), retry };
 }

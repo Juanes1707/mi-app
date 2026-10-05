@@ -14,5 +14,9 @@ export type PostImageRequest<TImage> = {
 };
 
 export interface PostImageSource<TImage> {
+  // Synchronous level-one preview for media whose path came from an already
+  // authorized application response. Callers must still request() so access is
+  // revalidated and revoked media can be purged.
+  peek(imagePath: string): TImage | undefined;
   request(imagePath: string): PostImageRequest<TImage>;
 }
