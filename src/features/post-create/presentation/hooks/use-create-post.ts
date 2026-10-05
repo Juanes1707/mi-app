@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { LocalPostImage, PostMediaUploadTicket, PublishedPost } from '@/features/post-create/domain/models';
 import { PostCreateError } from '@/features/post-create/domain/post-create-error';
+import type { PostImageSelectionMode } from '@/features/post-create/domain/ports';
 import {
   preparePostMediaUpload, publishPost, selectPostImage, uploadPostMedia,
 } from '@/features/post-create/post-create-container';
@@ -12,6 +13,7 @@ type State = {
   caption: string;
   phase: Phase;
   selecting: boolean;
+  selectionMode: PostImageSelectionMode | null;
   error: PostCreateError | null;
   captionLocked: boolean;
   retryUpload: boolean;
@@ -29,7 +31,7 @@ const emptyAttempt = (): Attempt => ({
 });
 const initialState: State = {
   image: null, caption: '', phase: 'idle', selecting: false, error: null,
-  captionLocked: false, retryUpload: false, canRestart: false,
+  selectionMode: null, captionLocked: false, retryUpload: false, canRestart: false,
 };
 
 export function useCreatePost(onPublished: (post: PublishedPost) => void) {
@@ -54,13 +56,13 @@ export function useCreatePost(onPublished: (post: PublishedPost) => void) {
     };
   }, []);
 
-  const selectImage = useCallback(async () => {
+  const selectImage = useCallback(async (mode: PostImageSelectionMode) => {
     if (busyRef.current || !mountedRef.current) return;
     busyRef.current = true;
     const generation = ++generationRef.current;
-    update({ selecting: true });
+    update({ selecting: true, selectionMode: mode });
     try {
-      const image = await selectPostImage.execute();
+      const image = await selectPostImage.execute(mode);
       if (!mountedRef.current || generation !== generationRef.current) return;
       if (image) {
         attemptRef.current = emptyAttempt();
@@ -74,7 +76,7 @@ export function useCreatePost(onPublished: (post: PublishedPost) => void) {
     } finally {
       if (mountedRef.current && generation === generationRef.current) {
         busyRef.current = false;
-        update({ selecting: false });
+        update({ selecting: false, selectionMode: null });
       }
     }
   }, [update]);
@@ -83,6 +85,19 @@ export function useCreatePost(onPublished: (post: PublishedPost) => void) {
     if (busyRef.current || stateRef.current.captionLocked) return;
     update({ caption, error: null,
       phase: stateRef.current.image ? 'ready' : 'idle' });
+  }, [update]);
+
+  const removeImage = useCallback(() => {
+    if (busyRef.current || !mountedRef.current || stateRef.current.captionLocked) return;
+    attemptRef.current = emptyAttempt();
+    update({
+      image: null,
+      phase: 'idle',
+      error: null,
+      selectionMode: null,
+      retryUpload: false,
+      canRestart: false,
+    });
   }, [update]);
 
   const submit = useCallback(async () => {
@@ -155,7 +170,7 @@ export function useCreatePost(onPublished: (post: PublishedPost) => void) {
   }, [update]);
 
   const busy = state.selecting || ['preparing', 'uploading', 'publishing', 'success'].includes(state.phase);
-  return { state, busy, selectImage, changeCaption, submit, restart };
+  return { state, busy, selectImage, removeImage, changeCaption, submit, restart };
 }
 
 function asPostError(error: unknown): PostCreateError {

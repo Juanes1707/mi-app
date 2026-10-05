@@ -2,7 +2,7 @@ import type {
   LocalPostImage, PostMediaInput, PostMediaUploadTicket, PublishPostInput,
 } from '@/features/post-create/domain/models';
 import type {
-  PostImageSelector, PostMediaUploader, PostPublishingRepository,
+  PostImageSelectionMode, PostImageSelector, PostMediaUploader, PostPublishingRepository,
 } from '@/features/post-create/domain/ports';
 import { PostCreateError } from '@/features/post-create/domain/post-create-error';
 
@@ -22,8 +22,8 @@ export function validatePostPublication(input: PublishPostInput): void {
 
 export class SelectPostImage {
   constructor(private readonly selector: PostImageSelector) {}
-  async execute() {
-    const image = await this.selector.select();
+  async execute(mode: PostImageSelectionMode) {
+    const image = await this.selector.select(mode);
     if (image) validatePostMedia(image);
     return image;
   }

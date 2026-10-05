@@ -1,13 +1,18 @@
 import { launchImageLibraryAsync } from 'expo-image-picker';
-import type { LocalPostImageInspector, PostImageSelector } from '@/features/post-create/domain/ports';
+import type {
+  LocalPostImageInspector, PostImageSelectionMode, PostImageSelector,
+} from '@/features/post-create/domain/ports';
 import { PostCreateError } from '@/features/post-create/domain/post-create-error';
 
 export class ExpoPostImageSelector implements PostImageSelector {
   constructor(private readonly inspector: LocalPostImageInspector) {}
-  async select() {
+  async select(mode: PostImageSelectionMode) {
     try {
       const result = await launchImageLibraryAsync({
-        mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.85,
+        mediaTypes: ['images'], allowsMultipleSelection: false,
+        allowsEditing: mode === 'crop-square',
+        ...(mode === 'crop-square' ? { aspect: [1, 1] as [number, number] } : {}),
+        quality: 0.85, exif: false, base64: false,
       });
       if (result.canceled) return null;
       const asset = result.assets[0];

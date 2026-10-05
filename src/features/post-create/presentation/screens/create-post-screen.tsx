@@ -31,27 +31,64 @@ const progress: Record<string, string> = {
 
 export function CreatePostScreen({ onPublished }: { onPublished: (post: PublishedPost) => void }) {
   const theme = useTheme();
-  const { state, busy, selectImage, changeCaption, submit, restart } = useCreatePost(onPublished);
+  const {
+    state, busy, selectImage, removeImage, changeCaption, submit, restart,
+  } = useCreatePost(onPublished);
   const disabled = busy || !state.image || state.caption.length > 2200;
+  const removeImageDisabled = busy || state.captionLocked;
 
   return (
     <SafeAreaView edges={['bottom', 'left', 'right']} style={[styles.screen, { backgroundColor: theme.background }]}>
       <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
           {state.image ? (
-            <Image accessibilityLabel="Vista previa de la imagen seleccionada"
-              source={{ uri: state.image.uri }} resizeMode="cover" style={styles.preview} />
+            <View style={styles.previewFrame}>
+              <Image accessibilityLabel="Vista previa de la imagen seleccionada"
+                source={{ uri: state.image.uri }} resizeMode="cover" style={styles.previewImage} />
+              <Pressable
+                accessibilityLabel="Quitar imagen seleccionada"
+                accessibilityRole="button"
+                accessibilityState={{ disabled: removeImageDisabled }}
+                disabled={removeImageDisabled}
+                hitSlop={8}
+                onPress={removeImage}
+                style={({ pressed }) => [
+                  styles.removeImage,
+                  pressed && !removeImageDisabled ? styles.removeImagePressed : undefined,
+                  removeImageDisabled ? styles.disabled : undefined,
+                ]}>
+                <Text style={styles.removeImageText}>×</Text>
+              </Pressable>
+            </View>
           ) : (
             <View style={[styles.preview, styles.placeholder, { backgroundColor: theme.backgroundElement }]}>
               <Text style={{ color: theme.textSecondary }}>Selecciona una imagen para tu publicación</Text>
             </View>
           )}
-          <Pressable accessibilityRole="button" disabled={busy} onPress={selectImage}
+          <Pressable accessibilityRole="button" disabled={busy}
+            onPress={() => selectImage('original')}
             style={[styles.button, { backgroundColor: theme.backgroundElement }, busy && styles.disabled]}>
             <Text style={[styles.buttonText, { color: theme.text }]}>
-              {state.selecting ? 'Seleccionando...' : state.image ? 'Cambiar imagen' : 'Seleccionar imagen'}
+              {state.selecting && state.selectionMode === 'original'
+                ? 'Seleccionando...'
+                : state.image ? 'Elegir otra imagen original' : 'Elegir imagen original'}
             </Text>
           </Pressable>
+          <Pressable accessibilityRole="button" disabled={busy}
+            onPress={() => selectImage('crop-square')}
+            style={[styles.button, { backgroundColor: theme.backgroundElement }, busy && styles.disabled]}>
+            <Text style={[styles.buttonText, { color: theme.text }]}>
+              {state.selecting && state.selectionMode === 'crop-square'
+                ? 'Abriendo editor...'
+                : state.image ? 'Elegir otra y recortar' : 'Elegir y recortar'}
+            </Text>
+          </Pressable>
+          <Text style={[styles.help, { color: theme.textSecondary }]}>
+            La opción de recorte permite ajustar y girar la imagen. En Android se confirma con CROP.
+          </Text>
+          <Text style={[styles.help, { color: theme.textSecondary }]}>
+            La imagen solo se subirá cuando pulses &quot;Subir y publicar&quot;.
+          </Text>
           <TextInput accessibilityLabel="Texto de la publicación" multiline maxLength={2200}
             editable={!busy && !state.captionLocked} value={state.caption} onChangeText={changeCaption}
             placeholder="Escribe un texto..." placeholderTextColor={theme.textSecondary}
@@ -75,7 +112,9 @@ export function CreatePostScreen({ onPublished }: { onPublished: (post: Publishe
             disabled={disabled} onPress={submit}
             style={[styles.button, { backgroundColor: theme.text }, disabled && styles.disabled]}>
             <Text style={[styles.buttonText, { color: theme.background }]}>
-              {state.retryUpload ? 'Reintentar subida' : state.error ? 'Reintentar publicación' : 'Publicar'}
+              {state.retryUpload
+                ? 'Reintentar subida'
+                : state.error ? 'Reintentar publicación' : 'Subir y publicar'}
             </Text>
           </Pressable>
           {state.canRestart ? (
@@ -97,8 +136,18 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { alignSelf: 'center', width: '100%', maxWidth: MaxContentWidth,
     padding: 20, paddingBottom: BottomTabInset + 24, gap: 16 },
+  previewFrame: { aspectRatio: 1, width: '100%', position: 'relative' },
   preview: { aspectRatio: 1, width: '100%', borderRadius: 12 },
+  previewImage: { height: '100%', width: '100%', borderRadius: 12 },
   placeholder: { alignItems: 'center', justifyContent: 'center', padding: 24 },
+  removeImage: {
+    position: 'absolute', top: 10, right: 10, width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0, 0, 0, 0.68)',
+    borderColor: 'rgba(255, 255, 255, 0.72)', borderWidth: StyleSheet.hairlineWidth,
+    elevation: 3,
+  },
+  removeImagePressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
+  removeImageText: { color: '#FFFFFF', fontSize: 27, fontWeight: '300', lineHeight: 29 },
   button: { minHeight: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center', padding: 12 },
   buttonText: { fontSize: 16, fontWeight: '600' },
   caption: { minHeight: 120, borderRadius: 12, padding: 16, fontSize: 16, textAlignVertical: 'top' },

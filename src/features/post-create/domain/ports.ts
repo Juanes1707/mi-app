@@ -12,6 +12,7 @@ export interface PostMediaUploader {
 export interface LocalPostImageInspector {
   inspect(uri: string, mimeType?: string): LocalPostImage;
 }
+export type PostImageSelectionMode = 'original' | 'crop-square';
 export interface PostImageSelector {
-  select(): Promise<LocalPostImage | null>;
+  select(mode: PostImageSelectionMode): Promise<LocalPostImage | null>;
 }
