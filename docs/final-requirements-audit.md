@@ -45,16 +45,16 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 | L1 RAM limit 32 MiB | PASS | `POST_MEDIA_MEMORY_BUDGET_BYTES` | One byte-budgeted LRU owns the decoded-image cache. | ✅ Constant/constructor inspection | Native retained memory was not measured. |
 | L2 disk limit 128 MiB | PASS | `POST_MEDIA_DISK_BUDGET_BYTES`, `DiskImageCache` | Serialized index, size checks and LRU eviction are implemented. | ✅ Source inspection | Device filesystem pressure was not exercised. |
 | Signed URL is not cache identity | PASS | disk key parser and story namespace | Stable `imagePath`/namespaced story key identifies entries; signed URL is used only for the authorized download. | ✅ Source inspection | Hosted signed URL expiry was not exercised. |
-| Viewport cancellation | PASS | Feed viewability tracking, Post media hook/loader | Leaving the viewport cancels the consumer; the last consumer aborts the shared download. | ✅ Source inspection | Android scroll behavior was not measured. |
+| Viewport cancellation | PASS | Feed viewability tracking, Post media hook/loader | Leaving the viewport cancels the consumer; the last consumer aborts the shared download. A fast fling on a physical phone left passed rows on the placeholder and loaded only where it stopped. | ✅ Source inspection + manual device run (Expo Go) | Native network cancellation was not traced. |
 | In-flight image dedupe | PASS — simulated/local | `PostImageLoader.inFlight` | Two concurrent consumers of one key produced one acquisition in the focused harness. | 🧪 Local harness | Native downloader was replaced by a fake. |
 | Memory cleanup and decode bounds | PASS | memory pressure binding, decoder purge, 1440 px limit | RAM references are cleared under pressure; Expo internal caches are purged; decoded longest edge is bounded. | ✅ Source inspection | `meminfo` was not available. |
 | Posts and Stories share cache infrastructure | PASS | `post-media-container.ts`, `stories-container.ts` | Both use the same RAM LRU, disk LRU, downloader and decoder; Stories use a namespaced key and owner-bound authorizer. | ✅ Construction inspection | Native runtime was not exercised. |
 | Expo Image does not add a parallel cache | PASS | Post media component and decoder | Render uses decoded local `ImageRef` with `cachePolicy="none"`; decoder purges internal caches. | ✅ Source inspection | Native library internals were not profiled. |
 | Long Feed readiness | PASS — simulated/local | Feed `FlatList` (windowSize 7), keyset page loading, viewability control, retained-row rule | Only visible rows ±1 hold decoded bitmaps; a 600-post down-and-back scroll simulation with the real LRU peaks at 39.6 MiB (150 MiB before) and is independent of list length, with no placeholder flash. | 🧪 `post-media-image-state.test.mjs` | Device memory (`meminfo`) was not measured. |
-| 60 FPS long Feed | BLOCKED — environment | Architecture is prepared but no metric exists | No Android SDK, ADB, emulator or physical device; no `gfxinfo` trace. | ⚠️ Not executable | 60 FPS must not be claimed. |
+| 60 FPS long Feed | PASS | Feed `FlatList` (windowSize 7), retained-row rule, viewport-controlled image work | Continuous down/up scroll of the whole hosted Feed on a physical phone stayed between 80 and 120 FPS (UI, Expo Go performance monitor, high refresh rate display); 2 minutes of scrolling without a crash or freeze. | ✅ Manual device run (Expo Go) | Expo Go is not a release build and no `gfxinfo`/`meminfo` trace exists; those need a development build and ADB. |
 | Optimistic Like update | PASS | `use-optimistic-post-likes.ts` | Visible state changes immediately and overlays canonical feed state. | ✅ Source inspection | Gesture latency was not measured. |
 | Durable Like projection/queue | PASS | SQLite offline schema/queue | Owner, post and desired state are stored durably. | ✅ Source/SQL inspection | Device process-death scenario was not exercised. |
-| FIFO Like replay after reconnect | PASS — simulated/local | processor/coordinator/orchestrator | A single serial drain peeks the smallest sequence and triggers on connectivity/foreground events; transient failures are retried with capped exponential backoff while the app is in use and online. | 🧪 `offline-sync-queue.test.mjs` (real SQLite file) | Real radio reconnect was not exercised. |
+| FIFO Like replay after reconnect | PASS | processor/coordinator/orchestrator | A single serial drain peeks the smallest sequence and triggers on connectivity/foreground events; transient failures are retried with capped exponential backoff while the app is in use and online. Two phones confirmed reconnect with the app open and close-offline/reopen sync. | ✅ Manual device run (Expo Go) + 🧪 `offline-sync-queue.test.mjs` | OS background run with the app closed needs a development build. |
 | Background queue processing | PASS — simulated/local | `offline-sync-background.ts`, `expo-offline-sync-background-task.ts`, `index.ts` | While signed in, an `expo-background-task` task drains through the same orchestrator with the app in background; it is defined before Expo Router so a headless OS start finds it. | 🧪 Local harness (task body) + Android Hermes export | Expo Go reports background tasks as restricted; OS scheduling needs a development build. |
 | Like canonical reconciliation | PASS | resolution signal and optimistic overlay | Terminal server result removes the queue row and reconciles visible state. | ✅ Source inspection | Hosted canonical response was not exercised. |
 | Optimistic Comment with client UUID | PASS | comment composer/use cases/overlay | UUID exists before enqueue and is reused by the remote command. | ✅ Source inspection | Native interaction was not exercised. |
@@ -114,9 +114,9 @@ The `Status` column uses only the allowed values. `PASS` means the tracked imple
 
 | Status | Count |
 |---|---:|
-| PASS | 66 |
-| PASS — simulated/local | 16 |
-| BLOCKED — environment | 6 |
+| PASS | 68 |
+| PASS — simulated/local | 15 |
+| BLOCKED — environment | 5 |
 | FAIL | 0 |
 
 ## Confirmed defects corrected across the final audits
