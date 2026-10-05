@@ -153,8 +153,10 @@ class FakeNetwork {
   state = { isConnected: true, isInternetReachable: true };
   listeners = new Set();
   fetch() { return Promise.resolve(this.state); }
+  // Like NetInfo.addEventListener: the latest known state is delivered right away.
   subscribe(listener) {
     this.listeners.add(listener);
+    listener(this.state);
     return () => this.listeners.delete(listener);
   }
   set(connected) {
@@ -496,6 +498,52 @@ test('another account never sends or deletes the previous owner queue', async ()
     await h.dispose();
   }
 });
+
+// Manual test B: like + comment in airplane mode, close the app, reconnect, reopen.
+async function closedOfflineSession() {
+  const session = createHarness();
+  session.backend.online = false;
+  await like(session, post1, true);
+  await comment(session, comment1, 'offline cerrado');
+  await session.orchestrator.requestDrain('enqueue');
+  await session.close();
+  session.backend.online = true;
+  return session;
+}
+
+const launchVariants = {
+  'app active and online when the session is restored': async () => {},
+  'Android reports background at JS start, then active': async (h) => { h.appState.state = 'background'; },
+  'Wi-Fi still connecting at launch': async (h) => {
+    h.network.state = { isConnected: false, isInternetReachable: null };
+  },
+  'first request after launch fails (route not ready)': async (h) => { h.backend.faults.push('network'); },
+};
+
+for (const [variant, prepare] of Object.entries(launchVariants)) {
+  test(`reopening after closing offline syncs at launch: ${variant}`, async () => {
+    const closed = await closedOfflineSession();
+    const h = createHarness({ dir: closed.dir, backend: closed.backend });
+    try {
+      await prepare(h);
+      // OfflineSyncCoordinatorHost: start on mount, owner once auth restores the session.
+      h.coordinator.start();
+      h.coordinator.setOwnerUserId(userA);
+      await settle();
+      if (h.appState.state !== 'active') h.appState.set('active');
+      if (h.network.state.isConnected !== true) h.network.set(true);
+      await settle();
+      const [delay] = h.timers.pendingDelays();
+      if (delay !== undefined) await h.timers.advance(delay);
+
+      assert.deepEqual(h.backend.applied, [`like:${post1}`, `comment:${comment1}`]);
+      assert.deepEqual(await pendingKinds(h), []);
+      assert.equal(h.results.at(-1).kind, 'drained');
+    } finally {
+      await h.dispose();
+    }
+  });
+}
 
 test('the background task drains the queue while the app is not in the foreground', async () => {
   const h = createHarness();
