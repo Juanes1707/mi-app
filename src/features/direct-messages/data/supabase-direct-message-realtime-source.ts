@@ -39,12 +39,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-// A Broadcast message is untrusted input: the expected event and EXACTLY these
-// payload keys, or it is dropped silently (no request, no state change).
+// Supabase Realtime adds the realtime.messages row id to every broadcast sent from the
+// database (realtime.send). It is transport metadata: tolerated only as a UUID.
+export const REALTIME_MESSAGE_ID_KEY = 'id';
+
+// A Broadcast message is untrusted input: the expected event and exactly these
+// payload keys (plus Realtime's own `id`), or it is dropped silently (no request, no
+// state change). Any other extra key, such as a smuggled body, is still rejected.
 function exactPayload(message: unknown, event: string, fields: string[]): Record<string, unknown> | null {
   if (!isRecord(message) || message.event !== event || !isRecord(message.payload)) return null;
-  const keys = Object.keys(message.payload);
-  return keys.length === fields.length && fields.every((field) => keys.includes(field)) ? message.payload : null;
+  const payload = message.payload;
+  const keys = Object.keys(payload);
+  const extra = keys.filter((key) => !fields.includes(key));
+  if (!fields.every((field) => keys.includes(field))) return null;
+  if (extra.length > 1 || (extra.length === 1 &&
+      (extra[0] !== REALTIME_MESSAGE_ID_KEY || normalizeDirectUuid(payload[REALTIME_MESSAGE_ID_KEY]) === null))) {
+    return null;
+  }
+  return payload;
 }
 
 // expectedConversationId null: the inbox topic, whose hints may name any conversation.

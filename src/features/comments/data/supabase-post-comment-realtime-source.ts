@@ -26,13 +26,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 // A Broadcast message is untrusted input: exactly { postId, commentId }, both UUIDs, for
-// the subscribed post. Anything else is dropped silently (no request, no state change).
+// the subscribed post, plus the `id` (a UUID) that Supabase Realtime adds to every
+// broadcast sent from the database. Anything else is dropped silently (no request, no
+// state change).
 export function parseCommentCreatedMessage(message: unknown, postId: string): PostCommentCreatedEvent | null {
   if (!isRecord(message) || message.event !== COMMENT_CREATED_EVENT) return null;
   const payload = message.payload;
   if (!isRecord(payload)) return null;
   const keys = Object.keys(payload);
-  if (keys.length !== 2 || !keys.includes('postId') || !keys.includes('commentId')) return null;
+  const extra = keys.filter((key) => key !== 'postId' && key !== 'commentId');
+  if (!keys.includes('postId') || !keys.includes('commentId') || extra.length > 1 ||
+      (extra.length === 1 && (extra[0] !== 'id' || !isUuid(payload.id)))) return null;
   const { postId: eventPostId, commentId } = payload;
   if (!isUuid(eventPostId) || !isUuid(commentId) || eventPostId.toLowerCase() !== postId) return null;
   return { postId, commentId: commentId.toLowerCase() };

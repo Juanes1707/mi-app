@@ -25,6 +25,9 @@ process.env.EXPO_PUBLIC_BACKEND_BASE_URL ??= 'https://backend.invalid';
 const realtime = await import(pathToFileURL(path.join(
   root, 'src/features/direct-messages/data/supabase-direct-message-realtime-source.ts',
 )).href);
+const comments = await import(pathToFileURL(path.join(
+  root, 'src/features/comments/data/supabase-post-comment-realtime-source.ts',
+)).href);
 const overlay = await import(pathToFileURL(path.join(
   root, 'src/features/direct-messages/presentation/receipt-overlay.ts',
 )).href);
@@ -49,6 +52,29 @@ test('a message-created hint is accepted only with exactly its ids and order key
   assert.equal(realtime.parseMessageCreatedMessage(created({ ...valid, body: 'forged' }), conversation), null);
   assert.equal(realtime.parseMessageCreatedMessage({ event: 'typing', payload: valid }, conversation), null);
   assert.equal(realtime.parseMessageCreatedMessage(created({ ...valid, messageId: 'x' }), conversation), null);
+});
+
+// Exactly what the hosted project delivered (live probe): Supabase Realtime adds the
+// realtime.messages row id to every broadcast sent with realtime.send.
+const realtimeId = 'ee3d826c-040e-4ae8-8b85-01b507ca4fe4';
+
+test('database broadcasts carrying the Realtime row id are accepted; other extras are not', () => {
+  const valid = { conversationId: conversation, messageId: message1, senderId: sender, createdAt: t1 };
+  assert.deepEqual(realtime.parseMessageCreatedMessage(created({ id: realtimeId, ...valid }), conversation), valid);
+  assert.deepEqual(realtime.parseMessageCreatedMessage(created({ id: realtimeId, ...valid }), null), valid);
+  assert.equal(realtime.parseMessageCreatedMessage(created({ ...valid, id: 'not-a-uuid' }), conversation), null);
+  assert.equal(realtime.parseMessageCreatedMessage(created({ ...valid, id: realtimeId, body: 'forged' }), conversation), null);
+  const receipt = {
+    id: realtimeId, conversationId: conversation, messageSenderId: sender, throughMessageId: message1,
+    throughCreatedAt: t1, kind: 'read', at: t2,
+  };
+  assert.equal(realtime.parseReceiptMessage({ event: 'message-receipt', payload: receipt }, conversation).kind, 'read');
+  assert.equal(comments.parseCommentCreatedMessage(
+    { event: 'comment-created', payload: { id: realtimeId, postId: conversation, commentId: message1 } }, conversation,
+  ).commentId, message1);
+  assert.equal(comments.parseCommentCreatedMessage(
+    { event: 'comment-created', payload: { id: realtimeId, postId: conversation, commentId: message1, body: 'x' } }, conversation,
+  ), null);
 });
 
 test('typing and receipt hints are validated against the subscribed conversation', () => {
